@@ -94,8 +94,26 @@ Copy [examples/profile.cordis.patch.yml](../examples/profile.cordis.patch.yml) t
 | --- | --- | --- |
 | `stateDir` | yes | Absolute path: the database, the lock, the command shims in `worker-bin`, the agent's git configuration and, by default, the Ticket directories in `work`. Back it up before upgrades |
 | `promptMaxChars`, `admissionContextMaxPages`, `admissionContextTimeoutMs` | no | The largest saved prompt configuration, and how many Thread pages one assessment reads within what time |
+| `localRepository`, `localBranch` | no | Absolute path of a local git repository to work in, and the ref each Ticket worktree starts from (empty means its `HEAD`). Set this **instead of** the GitHub Source's repository; setting both refuses setup. A restart applies it |
 
-After the first start, edit machine limits in **Settings → Deployment** or the DeepSeek Harness Plugin Manager. Changes apply without restart. `stateDir` cannot be changed there. Invalid values or unknown configuration keys prevent startup; the log identifies the key.
+After the first start, edit machine limits in **Settings → Deployment** or the DeepSeek Harness Plugin Manager. Changes apply without restart. `stateDir`, `localRepository` and `localBranch` cannot be changed there. Invalid values or unknown configuration keys prevent startup; the log identifies the key.
+
+A local repository needs no GitHub account or `gh`. Workers get a detached worktree under the Ticket directory, commit there, and report ready with the branch and commit; a person reviews the change in the panel. `gh` is shimmed to fail, and the prompt replaces pull-request delivery with a local commit. Point `localRepository` at a clone whose `origin` is GitLab, Gitea or another git host to work against a self-hosted repository; workers push the branch with git when that remote is writable, and no hosted API or pull request is required.
+
+## Self-hosted Git and generic IM
+
+Gitea and GitLab are opt-in Source kinds in **Sources**; both start off with no repository. Configure a site URL, repository, an API token for replies, a webhook secret, and the agent account name. The kind turns Issues, merge requests and comments into Tickets; a message is explicit only when it mentions the configured agent name. Switching one on also gives its Sessions the bundled Gitea or GitLab skill, which says how to read the ticket and post a reply without `gh`.
+
+Register the webhook with the forge, pointing at this host:
+
+| Provider | URL | Secret header | Events |
+| --- | --- | --- | --- |
+| Gitea | `/orchestrator/git/gitea` | `X-Gitea-Signature`, an HMAC-SHA256 of the body using the configured secret | Issues, Issue Comment, Pull Request |
+| GitLab | `/orchestrator/git/gitlab` | `X-Gitlab-Token`, the configured Secret Token | Issue, Note, Merge request |
+
+The DSH Web server is loopback-only: put a reverse proxy in front of it, or forward the provider's webhook to the loopback address. The secret is the only gate outside the panel's same-origin check, so keep it private and use HTTPS at the proxy.
+
+The panel can stand in for any IM bridge. Set **Outbound webhook URL** to receive every panel reply as `{id, text, thread, ticket_id}` (an optional **Inbound webhook secret** is sent as `Authorization: Bearer`). Set **Inbound webhook secret** to accept messages at `POST /orchestrator/hook` with header `X-Superagent-Secret` and a JSON body `{text, thread?, id?}`; an IM bridge can map its own conversations to `thread`. Leave either secret empty to turn that direction off.
 
 ## Start and stop
 

@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto'
 import { expect, it } from 'vitest'
 import { z } from 'zod'
 import { registerHttp } from '../src/app/http.ts'
@@ -14,12 +15,12 @@ function serve(runtime: Partial<Record<keyof HttpHost, unknown>>, host = '127.0.
   let handler: Handler = async () => {}
   const ctx = { webServer: { host, port: 3082, register: (route: { handler: Handler }) => { handler = route.handler; return () => {} } } }
   registerHttp(ctx as never, { ready: Promise.resolve(), ...runtime } as unknown as HttpHost)
-  return async (method: string, path: string, body?: unknown, headers: Headers = {}) => {
+  return async (method: string, path: string, body?: unknown, headers: Headers = {}, prefix = '/orchestrator/api/') => {
     let status = 0, text = ''
     const chunks = body === undefined ? [] : [Buffer.from(typeof body === 'string' ? body : JSON.stringify(body))]
     const sent = Object.fromEntries(Object.entries({ host: '127.0.0.1:3082', 'x-orchestrator-request': '1', ...headers }).filter(([,
       value]) => value !== undefined))
-    const req = { method, url: `/orchestrator/api/${path}`, headers: sent, async *[Symbol.asyncIterator]() { yield* chunks } }
+    const req = { method, url: `${prefix}${path}`, headers: sent, async *[Symbol.asyncIterator]() { yield* chunks } }
     await handler(req, { writeHead: (code: number) => { status = code }, end: (data: string) => { text = data } })
     return { status, body: JSON.parse(text) as Record<string, unknown> }
   }
@@ -78,6 +79,49 @@ it('answers only a same-origin request from the panel on the loopback address', 
   expect(await post({ host: 'localhost:3082', origin: 'http://localhost:3082' })).toMatchObject({ status: 200 })
   // Management routes require a loopback Web server.
   expect(() => serve({}, '0.0.0.0')).toThrow('Orchestrator management requires a loopback Web server')
+})
+
+it('accepts a bridge message at the panel hook with its secret, and refuses a wrong or missing one', async () => {
+  const sent: unknown[] = []
+  const call = serve({
+    sources: { instance: () => ({ enabled: true, config: { webhookSecret: 's3cret' } }) },
+    sendMessage: async (input: unknown) => { sent.push(input); return { trigger_id: 'panel:m1', thread: 'panel:m1' } },
+  })
+  const hook = (body: unknown, headers: Headers = {}) => call('POST', 'hook', body, headers, '/orchestrator/')
+  expect(await hook({ text: 'from IM', thread: 'chat-1' }, { 'x-superagent-secret': 's3cret' }))
+    .toEqual({ status: 200, body: { trigger_id: 'panel:m1', thread: 'panel:m1' } })
+  expect(sent).toEqual([{ text: 'from IM', thread: 'chat-1' }])
+  expect(await hook({ text: 'nope' }, { 'x-superagent-secret': 'wrong' })).toMatchObject({ status: 403 })
+  expect(await hook({ text: 'nope' })).toMatchObject({ status: 403 })
+  // The hook needs the panel's configured secret; without one it is absent even for a caller at the loopback address.
+  const off = serve({ sources: { instance: () => ({ enabled: true, config: {} }) } })
+  expect(await off('POST', 'hook', { text: 'x' }, {}, '/orchestrator/')).toMatchObject({ status: 404 })
+})
+
+it('accepts a signed Gitea webhook and hands its Trigger to the Engine', async () => {
+  const delivered: unknown[] = []
+  const call = serve({
+    sources: { instance: () => ({ enabled: true, config: { secret: 'hook-secret' } }),
+      ingress: async (source: string, input: { meta?: { event?: string } }) => ({ id: `${source}:acme/widgets#7:${input.meta?.event}:1`,
+        source, threads: [{ source, id: 'acme/widgets#7' }] }) },
+    receive: (trigger: unknown) => { delivered.push(trigger) },
+  })
+  const raw = JSON.stringify({ issue: { number: 7 }, sender: { login: 'alice' } })
+  const signature = createHmac('sha256', 'hook-secret').update(raw).digest('hex')
+  expect(await call('POST', 'git/gitea', raw, { 'x-gitea-signature': signature, 'x-gitea-event': 'issues' }, '/orchestrator/'))
+    .toEqual({ status: 200, body: { trigger_id: 'gitea:acme/widgets#7:issues:1', thread: 'gitea:acme/widgets#7' } })
+  expect(delivered).toHaveLength(1)
+  expect(await call('POST', 'git/gitea', raw, { 'x-gitea-signature': 'wrong' }, '/orchestrator/')).toMatchObject({ status: 403 })
+})
+
+it('accepts a GitLab webhook only with its configured token', async () => {
+  const call = serve({ sources: { instance: () => ({ enabled: true, config: { secret: 'gitlab-secret' } }),
+    ingress: async (source: string) => ({ id: `${source}:group/widgets#4:note:1`, source, threads: [{ source, id: 'group/widgets#4' }] }) },
+  receive: () => undefined })
+  const raw = JSON.stringify({ object_kind: 'issue', object_attributes: { iid: 4 } })
+  expect(await call('POST', 'git/gitlab', raw, { 'x-gitlab-token': 'gitlab-secret' }, '/orchestrator/'))
+    .toEqual({ status: 200, body: { trigger_id: 'gitlab:group/widgets#4:note:1', thread: 'gitlab:group/widgets#4' } })
+  expect(await call('POST', 'git/gitlab', raw, { 'x-gitlab-token': 'wrong' }, '/orchestrator/')).toMatchObject({ status: 403 })
 })
 
 it('answers a prompt save that lost a race with 409, and a settings body over 128 KiB with 400', async () => {

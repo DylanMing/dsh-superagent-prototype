@@ -2,6 +2,43 @@
 
 This cookbook shows how to extend dsh-superagent. It uses the terms in [001 Domain model](001-domain.md) and [002 Authorization](002-authorization.md), and the components in [007 Architecture](007-architecture.md).
 
+## Use a local git repository
+
+A local repository needs no GitHub Source and no `gh`. Set both fields in the `dsh-superagent` entry of the DSH configuration, then restart dsh-superagent:
+
+```yaml
+localRepository: /srv/work/widgets   # absolute path; any clone works, including GitLab or Gitea
+localBranch: main                    # empty uses the repository HEAD
+```
+
+The sidebar's **Superagent** panel is then the whole workflow: describe the change on the Trigger page, accept the candidate, and read the worker's replies on its Thread page. Each Ticket gets a detached `git worktree` under the Ticket directory; the worker commits there, pushes the branch only when the repository has a writable remote, and reports the branch and commit. Setup shims `gh` to fail and leaves the GitHub Source paused, so nothing polls GitHub or needs a GitHub account.
+
+Use `executor.prepare` instead when a repository needs a custom checkout (a sparse checkout, a submodule update, or credentials from another CLI); that command wins over the automatic worktree.
+
+## Connect a self-hosted Git repository
+
+Enable **Gitea** or **GitLab** in **Sources** and fill in:
+
+- **Site URL**: the forge root, such as `https://git.example.com`.
+- **Repository**: `owner/repo` for Gitea, `group/subgroup/repo` for GitLab.
+- **API token**: a token with issue/merge-request comment permission; without it, ingress works but replies are dropped.
+- **Webhook secret**: Gitea's webhook secret (the endpoint verifies its HMAC-SHA256 `X-Gitea-Signature`) or GitLab's Secret Token.
+- **Agent account name**: the name a comment must mention, for example `dsh-superagent`.
+
+Point the forge webhook at `/orchestrator/git/gitea` or `/orchestrator/git/gitlab` on the DSH Web server, behind a reverse proxy if the forge is on another machine. Issues, merge requests and comments become panel-visible Threads; the Source's Policy part lists who may originate work.
+
+## Bridge any IM into the panel
+
+The panel accepts messages from a bridge at `POST /orchestrator/hook` when **Inbound webhook secret** is set:
+
+```sh
+curl -sS http://127.0.0.1:3080/orchestrator/hook \
+  -H 'content-type: application/json' -H 'x-superagent-secret: <secret>' \
+  -d '{"text":"修一下登录页","thread":"im-chat-42","id":"im-message-7"}'
+```
+
+Set **Outbound webhook URL** to have every panel reply POSTed to the bridge as `{id, text, thread, ticket_id}`. The bridge decides how to render it; the panel remains the review surface and the place to continue a Thread.
+
 ## Add a Source
 
 This recipe implements a Source kind called `webhook`. It reads an imaginary message queue through an invented CLI, `hookq`, and converts messages to Triggers. All other interfaces are part of dsh-superagent.
@@ -15,6 +52,8 @@ The example assumes this CLI contract:
 - `hookq thread --conversation <id> --root <message id> --json`, with `--after <cursor>` for a later page, prints a page of a thread, oldest first: `{"items": […], "next": "<cursor>"}`, without `next` on the last page.
 
 Put the kind and its plugin entry in `src/sources/webhook.ts`, following `src/sources/github.ts`. If the Source grows, split translation, Channel and polling code into separate modules as the Feishu Source does.
+
+A Source published as its own package imports the same contracts and helpers from `dsh-superagent/source-kit`, and registers its kind on the `orchestrator` service from its own Cordis plugin. The relative imports in this recipe are for a Source kept in this repository; `src/` paths are not a public API.
 
 ### 1. Map the events onto the domain
 
@@ -351,6 +390,13 @@ Then export the built file in `package.json` by adding `"./webhook-watch": "./li
 Enable the plugin in a profile's `cordis.patch.yml` with `id: dsh-superagent-webhook` and `disabled: false`. Build and restart. The new Source appears in Sources settings and under **Eval → On each Source**.
 
 Add its module and spec to the module and test tables in [007 Architecture](007-architecture.md). `tests/docs.spec.ts` checks that both indexes are complete.
+
+A kind may also implement optional capabilities; a kind without one simply has no page, no local ingress or no readable resource:
+
+- `link(trigger, host, config)` resolves a message's external page. `host.cache` is a small text cache, and `{ read }` names a resource to read when the page cannot be resolved, as Feishu does when its CLI times out.
+- `textLimit = { replyWords }` is the largest reply the kind accepts; the Outbox checks it before storing the message. `IM_WORDS` is the Feishu limit.
+- `ingress(input, config)` turns a message composed outside the kind (such as in the management panel) into a Trigger. Keep `input.id` stable so a retry is idempotent.
+- `resource(trigger, name, host, config)` reads one external resource, such as a message or a repository file, for `orchestrator_read`.
 
 ### 11. Tests
 

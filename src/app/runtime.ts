@@ -13,7 +13,7 @@ import type {} from '@deepseek-ai/dsh-subprocess'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { lockSync } from 'proper-lockfile'
-import { Engine, key, reasonText, type EngineForSettings, type ReceiveResult, type Ticket, type Trigger } from '../core/index.ts'
+import { Engine, key, reasonText, threadKey, type EngineForSettings, type ReceiveResult, type Ticket, type Trigger } from '../core/index.ts'
 import { allowedSender, settingsPolicy } from '../policy.ts'
 import { SourceRegistry } from '../sources/registry.ts'
 import { Commands } from '../infra/commands.ts'
@@ -21,6 +21,7 @@ import type { Deployment, Machine } from '../deployment.ts'
 import { environmentOf, ticketEnvironment, type Variable } from './execution-environment.ts'
 import type { SetupProblem } from '../setup.ts'
 import { DshExecutor, sourceTrigger, triggerMessage, workerSessionId } from '../executor/dsh.ts'
+import { codeHostOf } from '../codehost/index.ts'
 import { ticketCard } from './cards.ts'
 import { MasterAssessor } from './assessment.ts'
 import { KV } from '../kv.ts'
@@ -39,9 +40,11 @@ import { Outbox } from './outbox.ts'
 import { Passes } from './passes.ts'
 import { Setup } from './setup.ts'
 import { feishuSettings } from '../sources/feishu.ts'
+import { PANEL, PANEL_ACTOR, panelKind } from '../sources/panel.ts'
+import { giteaKind, gitlabKind } from '../sources/forge.ts'
 import { health, type Health, type SourceContext, type SourceHost } from '../sources/host.ts'
 import { Sessions } from './sessions.ts'
-import { Settings } from './settings.ts'
+import { Settings, SettingsConflict } from './settings.ts'
 import { sourceContextOf, type SourceContextDeps } from './source-context.ts'
 import type { ResourceHost } from './resources.ts'
 import { mainTools, type MainToolsHost } from './tools/main.ts'
@@ -100,7 +103,9 @@ export class Runtime extends Service implements SourceHost {
       const deployed = () => setup.configured()
         ? environmentOf({ deployment: setup.deployment, sources: this.sources, settings: store.settings() }) : undefined
       const feishu = () => setup.configured() && !!setup.deployment.feishu
-      const prompts = this.prompts = new Prompts(store, () => machine.promptMaxChars.get(), deployed, feishu)
+      const prompts = this.prompts = new Prompts(store, () => machine.promptMaxChars.get(), deployed, feishu,
+        () => setup.configured() ? codeHostOf(setup.deployment).instructions : undefined,
+        () => sources.instances().filter(instance => instance.enabled && (instance.id === 'gitea' || instance.id === 'gitlab')).map(instance => instance.id))
       const masterId = this.masterId = store.get(KV.runtime.masterId) ?? `orchestrator-${key(machine.stateDir)}`
       store.set(KV.runtime.masterId, masterId)
       const commands = this.commands = new Commands(() => setup.deployment, setup.commandEnvironment, this.lifetime)
@@ -112,6 +117,10 @@ export class Runtime extends Service implements SourceHost {
           .catch(() => { /* sync() records its failure in health. */ })
         return () => {}
       })
+      // The panel is built in: it has no account or installable plugin, and is the fallback when no external Source is configured.
+      this.disposers.push(sources.register(panelKind))
+      // Self-hosted git is opt-in: both kinds start off, with no repository, until their settings name one.
+      this.disposers.push(sources.register(giteaKind), sources.register(gitlabKind))
       const links: LinkHost = { store, links: this.sourceLinks, commands, sources, lifetime: this.lifetime }
       const link = (trigger: Trigger, signal?: AbortSignal) => sourceLink(links, trigger, signal)
       const environment = (ticket: Ticket) => this.ticketEnvironment(ticket)
@@ -126,6 +135,7 @@ export class Runtime extends Service implements SourceHost {
       this.settings = new Settings({ store, sources, engine: { policyChanged }, health: board, context: ctx, lifetime: this.lifetime, sessions,
         sourceHost: this, setup, requestPass: () => { this.passes.request() } })
       this.executor = new DshExecutor({ context: ctx, get engine() { return runtime.engine }, store, effects, health: board.claim('worker'), machine,
+        get code() { return setup.configured() ? codeHostOf(setup.deployment) : codeHostOf({ repository: '' }) },
         lifetime: this.lifetime, sessions, closing: () => this.closing(), paused: () => this.paused(), environment, sourceLink: link,
         repliedTo: trigger => repliedTo({ store, sources }, trigger) })
       this.assessor = new MasterAssessor({ get engine() { return runtime.engine }, commands, get deployment() { return setup.deployment }, effects,
@@ -195,6 +205,30 @@ export class Runtime extends Service implements SourceHost {
   idle(): Promise<void> { return this.passes.idle() }
   pump(): Promise<void> { return this.passes.pump() }
   sendReplies(): Promise<void> { return this.outbox.sent() }
+  /**
+   * Turns a message composed in the panel into a Trigger and hands it to the Engine. The first panel message adds the local
+   * operator to the panel's Policy entry, so an installation with no external Source can still start work.
+   * @returns the Trigger and Thread key, or undefined while the panel Source is off.
+   */
+  async sendMessage(input: { text: string; thread?: string; id?: string }): Promise<{ trigger_id: string; thread: string } | undefined> {
+    if (!this.sources.instance(PANEL)?.enabled) return undefined
+    await this.ensurePanelOperator()
+    const trigger = await this.sources.ingress(PANEL, input)
+    if (!trigger) return undefined
+    this.receive(trigger)
+    return { trigger_id: trigger.id, thread: threadKey(trigger.threads[0]!) }
+  }
+  /** Seeds `policy.sources.panel` for the local operator when that part is absent; a concurrent first message may have won. */
+  private async ensurePanelOperator(): Promise<void> {
+    if (this.store.settings().policy.sources[PANEL]) return
+    const settings = this.store.settings()
+    const value = { ...settings.policy, sources: { ...settings.policy.sources,
+      [PANEL]: { allowed: [{ id: PANEL_ACTOR, name: 'Local operator' }], admission: {} } } }
+    try { await this.settings.save('policy', value, this.store.blockRevision('policy'), 'panel') }
+    catch (error) {
+      if (!(error instanceof SettingsConflict) || !this.store.settings().policy.sources[PANEL]) throw error
+    }
+  }
   private closing(): boolean { return this.closingFlag }
   /** Hold evaluation, dispatch, and outbound delivery while paused or awaiting setup; sources still record incoming triggers. */
   private paused(): boolean { return !this.setup.configured() || this.store.settings().paused }
@@ -223,7 +257,8 @@ export class Runtime extends Service implements SourceHost {
       get deployment() { return setup.deployment },
       get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem },
       configured: () => setup.configured(), links: () => runtime.links(), ticketEnvironment: ticket => runtime.ticketEnvironment(ticket),
-      checkSetup: () => { setup.check() }, requestPass: () => { passes.request() }, models: () => this.ctx.sessionController.modelCatalog() }
+      checkSetup: () => { setup.check() }, requestPass: () => { passes.request() }, sendMessage: input => runtime.sendMessage(input), receive: trigger => runtime.receive(trigger),
+      models: () => this.ctx.sessionController.modelCatalog() }
   }
   /** Idempotent stop; concurrent or repeated calls share the same shutdown promise. */
   stop(): Promise<void> { return this.stopping ??= this.shutdown() }

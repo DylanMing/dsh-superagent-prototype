@@ -2,6 +2,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { createHmac, timingSafeEqual } from 'node:crypto'
 import { z } from 'zod'
 import { THREAD_FILTERS, TICKET_FILTERS, type Api, type ApiResponse, type RouteParams } from './api.ts'
 import { sourceSkills } from './context.ts'
@@ -11,11 +12,13 @@ import { PromptConflict, SKILL_NAME, SKILL_PREFIX, TEAM_SECTIONS, builtInBase, b
 import { policyVersion } from '../policy.ts'
 import { SettingsConflict, type Settings } from './settings.ts'
 import { SetupError, type SetupProblem } from '../setup.ts'
-import { UserError, type EngineForPeople, type Ticket } from '../core/index.ts'
+import { UserError, type EngineForPeople, type Ticket, type Trigger } from '../core/index.ts'
 import type { Deployment, Machine } from '../deployment.ts'
 import type { DshExecutor } from '../executor/dsh.ts'
 import type { Health } from '../sources/host.ts'
 import type { SourceRegistry } from '../sources/registry.ts'
+import { PANEL } from '../sources/panel.ts'
+import { GITEA, GITLAB, type ForgeProvider } from '../sources/forge.ts'
 import type { Sessions } from './sessions.ts'
 import type { Store } from './store.ts'
 import type { TextCache } from './cache.ts'
@@ -52,6 +55,10 @@ export interface HttpHost {
   ticketEnvironment(ticket: Ticket): Variable[]
   checkSetup(): void
   requestPass(): void
+  /** Turns a panel message into a Trigger; undefined while the panel Source is off. */
+  sendMessage(input: { text: string; thread?: string; id?: string }): Promise<{ trigger_id: string; thread: string } | undefined>
+  /** Hands a webhook Trigger to the Engine; used by self-hosted Git ingress. */
+  receive(trigger: Trigger): unknown
   models(): Promise<ModelCatalog>
 }
 /**
@@ -59,14 +66,18 @@ export interface HttpHost {
  * Route handlers throw it when request bodies are malformed or target records are missing, and registerHttp serializes its status and message in the HTTP response.
  */
 class RouteError extends Error { constructor(readonly status: 400 | 404, message: string) { super(message) } }
-async function readBody(req: IncomingMessage, maxBytes = 128 * 1024): Promise<unknown> {
+async function readRaw(req: IncomingMessage, maxBytes = 128 * 1024): Promise<string> {
   let size = 0; const chunks: Buffer[] = []
   for await (const chunk of req) {
     const bytes = Buffer.from(chunk); size += bytes.length
     if (size > maxBytes) throw new RouteError(400, `Request exceeds ${maxBytes} bytes`)
     chunks.push(bytes)
   }
-  try { return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown }
+  return Buffer.concat(chunks).toString('utf8')
+}
+async function readBody(req: IncomingMessage, maxBytes = 128 * 1024): Promise<unknown> {
+  const raw = await readRaw(req, maxBytes)
+  try { return JSON.parse(raw) as unknown }
   catch { throw new RouteError(400, 'The request body is not JSON') }
 }
 function json(res: ServerResponse, status: number, value: unknown): void {
@@ -90,6 +101,48 @@ function failure(error: unknown): [number, Record<string, unknown>] {
   return [500, { error: error instanceof Error ? error.message : String(error) }]
 }
 
+const HookBody = z.object({ text: z.string().trim().min(1).max(100_000), thread: z.string().trim().max(100).optional(),
+  id: z.string().trim().max(100).optional() }).strict()
+/** Compares a bridge's secret without leaking its length or prefix through timing. */
+function sameSecret(given: string | undefined, expected: string): boolean {
+  if (!given) return false
+  const a = Buffer.from(given), b = Buffer.from(expected)
+  return a.length === b.length && timingSafeEqual(a, b)
+}
+/** Receives a message from any IM bridge that knows the panel's inbound secret, outside the panel's same-origin check. */
+async function panelHook(runtime: HttpHost, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const instance = runtime.sources.instance(PANEL) as { enabled: boolean; config: { webhookSecret?: string } } | undefined
+  if (!instance?.enabled || !instance.config.webhookSecret) { json(res, 404, { error: 'The inbound panel webhook is off' }); return }
+  const authorization = req.headers.authorization
+  const supplied = typeof req.headers['x-superagent-secret'] === 'string' ? req.headers['x-superagent-secret'] : authorization?.replace(/^Bearer /, '')
+  if (!sameSecret(supplied, instance.config.webhookSecret)) { json(res, 403, { error: 'The webhook secret is wrong' }); return }
+  const body = HookBody.parse(await readBody(req, 4 * 1024 * 1024))
+  const result = await runtime.sendMessage(body)
+  if (!result) throw new RouteError(400, 'The panel Source is off')
+  json(res, 200, result)
+}
+/** Verify a Gitea HMAC signature or a GitLab token, then turn the webhook into a Trigger. */
+async function gitHook(runtime: HttpHost, provider: ForgeProvider, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const instance = runtime.sources.instance(provider) as { enabled: boolean; config: { secret?: string } } | undefined
+  if (!instance?.enabled || !instance.config.secret) { json(res, 404, { error: `The ${provider} webhook is off` }); return }
+  const raw = await readRaw(req, 4 * 1024 * 1024)
+  if (provider === GITEA) {
+    const given = typeof req.headers['x-gitea-signature'] === 'string' ? req.headers['x-gitea-signature'] : ''
+    const expected = createHmac('sha256', instance.config.secret).update(raw).digest('hex')
+    if (!sameSecret(given, expected)) { json(res, 403, { error: 'The Gitea signature is wrong' }); return }
+  } else {
+    const given = typeof req.headers['x-gitlab-token'] === 'string' ? req.headers['x-gitlab-token'] : undefined
+    if (!sameSecret(given, instance.config.secret)) { json(res, 403, { error: 'The GitLab token is wrong' }); return }
+  }
+  let payload: unknown
+  try { payload = JSON.parse(raw) as unknown } catch { throw new RouteError(400, 'The request body is not JSON') }
+  const event = String(req.headers[provider === GITEA ? 'x-gitea-event' : 'x-gitlab-event'] ?? object(payload).object_kind ?? '')
+  const ingress = await runtime.sources.ingress(provider, { text: '', meta: { event, body: payload } })
+  if (!ingress) throw new RouteError(400, `The ${provider} Source is off`)
+  runtime.receive(ingress)
+  json(res, 200, { trigger_id: ingress.id, thread: `${provider}:${ingress.threads[0]!.id}` })
+}
+const object = (value: unknown): Record<string, unknown> => typeof value === 'object' && value !== null ? value as Record<string, unknown> : {}
 function machineView({ stateDir, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs }: Machine) {
   return { stateDir, promptMaxChars: promptMaxChars.get(), admissionContextMaxPages: admissionContextMaxPages.get(),
     admissionContextTimeoutMs: admissionContextTimeoutMs.get() }
@@ -140,6 +193,8 @@ const limit = (fallback: number, max: number) => z.coerce.number().int().positiv
 const TicketsQuery = z.object({ state: z.enum(TICKET_FILTERS).catch('open'), offset, limit: limit(20, 1000) })
 const ThreadsQuery = z.object({ filter: z.enum(THREAD_FILTERS).catch('subscribed'), offset, limit: limit(20, 1000) })
 const ThreadQuery = z.object({ limit: limit(50, 100), before: z.string().optional(), around: z.string().optional() })
+const MessageBody = z.object({ text: z.string().trim().min(1).max(100_000), thread: z.string().trim().max(100).optional(),
+  id: z.string().trim().max(100).optional() }).strict()
 const DecisionsQuery = z.object({ kind: z.string().default(''), window: z.literal('24h').optional().catch(undefined), offset,
   limit: limit(30, 200) })
 const count = z.coerce.number().int().nonnegative()
@@ -173,6 +228,11 @@ function routes(runtime: HttpHost): Routes {
     'POST threads/:key/unsubscribe': async ({ params }) => {
       const removed = runtime.engine.unsubscribe(params.key)
       return { removed, thread: params.key, context_delivery: await runtime.sessions.delivery(`subscription:${params.key}`) }
+    },
+    'POST messages': async ({ body }) => {
+      const result = await runtime.sendMessage(MessageBody.parse(await body()))
+      if (!result) throw new RouteError(400, 'The panel Source is off')
+      return result
     },
     'POST triggers/:id/requeue': ({ params }) => {
       const queued = runtime.engine.reevaluate(params.id)
@@ -233,6 +293,15 @@ export function registerHttp(ctx: Context, runtime: HttpHost): () => void {
   const disposers = [
     ctx.webServer.register({ kind: 'prefix', path: '/orchestrator', handler: async (req, res) => {
       const url = new URL(req.url ?? '/', 'http://localhost')
+      if (url.pathname === '/orchestrator/git/gitea' || url.pathname === '/orchestrator/git/gitlab') {
+        const provider = url.pathname.endsWith('/gitea') ? GITEA : GITLAB
+        try { await runtime.ready; await gitHook(runtime, provider, req, res) } catch (error) { json(res, ...failure(error)) }
+        return
+      }
+      if (url.pathname === '/orchestrator/hook') {
+        try { await runtime.ready; await panelHook(runtime, req, res) } catch (error) { json(res, ...failure(error)) }
+        return
+      }
       if (!url.pathname.startsWith('/orchestrator/api/')) { res.writeHead(404); res.end(); return }
       if (!sameOrigin(req, ctx.webServer.port)) { json(res, 403, { error: 'Same-origin management request required' }); return }
       try {
