@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SENSITIVE_ENV_PATTERN, type SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
-import { GIT_LOCATION, agentVariables, credentialHelper, runAsWorker, verifyDirectory, withoutDirectory, workerBin, workerGitConfig, writeEnvironment }
+import { GIT_LOCATION, agentVariables, credentialHelper, runAsWorker, verifyDirectory, verifyEnvironment, withoutDirectory, workerBin, workerGitConfig, writeEnvironment }
   from '../src/infra/environment.ts'
 import { CliError } from '../src/infra/commands.ts'
 import { testDeployment } from './fixtures/deployment.ts'
@@ -37,6 +37,14 @@ describe('worker shims', () => {
     const bin = workerBin(dir)
     await expect(exec(join(bin, 'lark-cli'), ['im', '+chat-list'])).rejects.toMatchObject({ code: 1, stderr: 'lark-cli is unavailable: this installation has no Feishu bot.\n' })
     await expect(exec(join(bin, 'personal-gh'), [])).rejects.toMatchObject({ code: 1, stderr: 'personal-gh is blocked in this installation; use gh, which acts as agent-bot.\n' })
+  })
+  it('makes gh fail and writes no GitHub credential for a local repository', async () => {
+    const local = testDeployment({ stateDir: dir, github: { cli: '', login: '', noreply: '' }, feishu: undefined })
+    await writeEnvironment(local, [])
+    await expect(exec(join(workerBin(dir), 'gh'), ['api', 'user']))
+      .rejects.toMatchObject({ code: 1, stderr: 'gh is unavailable: this installation works in a local git repository.\n' })
+    expect(readFileSync(workerGitConfig(dir), 'utf8')).not.toContain('github.com')
+    await expect(verifyEnvironment(local, subprocess(join(dir, 'global')), new AbortController().signal)).resolves.toBeUndefined()
   })
   it('keep `gh` and `lark-cli` working, and shim no `git`, when the blocked commands name the commands workers need', async () => {
     const gh = program(join(dir, 'gh-agent'), 'echo gh "$@"'), lark = program(join(dir, 'lark-bot'), 'echo lark "$@"')

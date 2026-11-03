@@ -14,6 +14,10 @@
       "default": "./lib/index.js"
     },
     "./client": "./lib/client.js",
+    "./source-kit": {
+      "types": "./lib/source-kit.d.ts",
+      "default": "./lib/source-kit.js"
+    },
     "./github-watch": "./lib/github-watch.js",
     "./feishu-watch": "./lib/feishu-watch.js",
     "./package.json": "./package.json",

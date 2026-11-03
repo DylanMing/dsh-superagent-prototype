@@ -20,6 +20,8 @@ export const Config = s.object({
     .description('Pages of thread context one assessment may read.').volatile(),
   admissionContextTimeoutMs: s.number().min(LIMITS.admissionContextTimeoutMs.min).max(LIMITS.admissionContextTimeoutMs.max).step(1)
     .default(15000).description('Time limit of one context read during an assessment, in milliseconds.').volatile(),
+  localRepository: s.string().default('').description('Absolute path of a local git repository to work in, without GitHub. Leave empty to use the GitHub Source. Takes effect after a restart.').required(false),
+  localBranch: s.string().default('').description('Branch or ref each local ticket worktree starts from; empty uses the repository HEAD. Takes effect after a restart.').required(false),
 })
 export type DeploymentConfig = ReturnType<typeof Config>
 export interface Machine {
@@ -27,6 +29,10 @@ export interface Machine {
   promptMaxChars: Volatile<number>
   admissionContextMaxPages: Volatile<number>
   admissionContextTimeoutMs: Volatile<number>
+  /** Absolute path of a local git repository, or empty to use the GitHub Source. */
+  localRepository: string
+  /** Ref a local worktree starts from, or empty for HEAD. */
+  localBranch: string
 }
 const MOVED: Record<string, string> = {
   repository: 'on the GitHub Source', branchPrefix: 'in the prepare command of the Execution settings', github: 'on the GitHub Source',
@@ -38,8 +44,10 @@ const MOVED: Record<string, string> = {
 export function machineOf(config: DeploymentConfig): Machine {
   const unknown = Object.keys(config).filter(key => !(key in (Config.dict ?? {})))
   if (unknown.length) throw new Error(`dsh-superagent configuration has keys it does not use: ${unknown.map(key => MOVED[key] ? `${key} (now ${MOVED[key]})` : key).join(', ')}; docs/006-deployment.md lists the keys`)
-  const { stateDir, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs } = config
-  return { stateDir, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs }
+  const { stateDir, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, localRepository, localBranch } = config
+  const local = localRepository.trim()
+  if (local && !isAbsolute(local)) throw new Error('localRepository must be an absolute path, or empty to use the GitHub Source')
+  return { stateDir, promptMaxChars, admissionContextMaxPages, admissionContextTimeoutMs, localRepository: local, localBranch: localBranch.trim() }
 }
 
 export const GithubAccountsSchema = z.object({
@@ -50,9 +58,24 @@ export const FeishuBotSchema = z.object({ cli: z.string().trim().default('') })
 /** Source configuration keys that affect deployment setup and trigger a restart when changed. */
 export const SETUP_FIELDS: Readonly<Record<string, readonly string[]>> = { github: Object.keys(GithubAccountsSchema.shape), feishu: Object.keys(FeishuBotSchema.shape) }
 
+/** The git host a local clone's origin points at; only Gitea and GitLab have named adapters here. */
+export type GitProvider = 'gitea' | 'gitlab' | 'other'
+export interface LocalRepository {
+  path: string
+  branch: string
+  /** The writable origin, when the clone has one; absent for a repository that only exists locally. */
+  remote?: { url: string; provider: GitProvider }
+}
+/** Names a clone's host from its origin URL without a network read; an unrecognized host is `other`. */
+export function providerOf(url: string): GitProvider {
+  const lower = url.toLowerCase()
+  return lower.includes('gitlab') ? 'gitlab' : lower.includes('gitea') ? 'gitea' : 'other'
+}
 export interface Deployment extends Machine {
   repository: string
   github: { cli: string; login: string; noreply: string }
+  /** Present when this installation works in a local git repository instead of GitHub. */
+  local?: LocalRepository
   feishu?: FeishuBot
 }
 export interface FeishuBot { cli: string; appId: string; brand: 'feishu' | 'lark'; botId: string; name: string }
@@ -85,9 +108,19 @@ function parsed<T>(schema: z.ZodType<T>, text: string): T | undefined {
 }
 /** Verify the agent's GitHub CLI identity and push access to the configured repository. */
 export async function resolveDeployment(machine: Machine, github: unknown, probe: Probe, path = process.env.PATH ?? ''): Promise<Deployment> {
-  const { stateDir } = machine
+  const { stateDir, localRepository, localBranch } = machine
   const accounts = GithubAccountsSchema.parse(github ?? {})
   const remote = accounts.repository
+  if (localRepository && remote) throw new SetupError('repositoryConflict')
+  if (!remote && localRepository) {
+    let root = ''
+    try { root = (await probe(['git', '-C', localRepository, 'rev-parse', '--show-toplevel'])).trim() }
+    catch (error) { throw new SetupError('localRepositoryUnreadable', { repository: localRepository, output: reason(error) }) }
+    if (!root) throw new SetupError('localRepositoryUnreadable', { repository: localRepository })
+    const url = await probe(['git', '-C', root, 'remote', 'get-url', 'origin']).then(value => value.trim()).catch(() => '')
+    return { ...machine, repository: root, github: { cli: '', login: '', noreply: '' },
+      local: { path: root, branch: localBranch, ...url ? { remote: { url, provider: providerOf(url) } } : {} } }
+  }
   if (!remote) throw new SetupError('repositoryUnset')
   if (!accounts.cli) throw new SetupError('agentCliUnset')
   let cli: string

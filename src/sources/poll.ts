@@ -2,6 +2,8 @@
 import { liveTicket, type Thread } from '../core/index.ts'
 import type { SourceContext } from './host.ts'
 
+/** The notification cursor of a polled account: when the poll started, whether the item was a pull request, and the last failure. */
+export interface Retry { since: string; pr: boolean; failedAt?: string; attempts?: number }
 /** How long a subscribed Thread with no live Ticket continues to be polled after its last Trigger or Ticket end. */
 export const POLL_HORIZON_MS = 14 * 24 * 3600_000
 /** True when a subscribed thread has a live ticket or recent activity/completion within `POLL_HORIZON_MS`. */

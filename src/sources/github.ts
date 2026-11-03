@@ -12,11 +12,12 @@ import type { GithubComment, PullRef } from './github-trigger.ts'
 import { observePull, pullsOf, readPull, type Pull } from './github-pull.ts'
 import { health, sourceContext, type Health, type SourceContext } from './host.ts'
 import { KV } from '../kv.ts'
-import { cursorAt, pause, POLL_HORIZON_MS, pollThreads as pollEach } from './poll.ts'
+import { cursorAt, pause, POLL_HORIZON_MS, pollThreads as pollEach, type Retry } from './poll.ts'
 import type { Localized, SourceKind } from './kind.ts'
 import { z } from 'zod'
 
 export { commentTrigger, type GithubComment } from './github-trigger.ts'
+export type { Retry } from './poll.ts'
 /** A notification of the agent account; `subject.url` is the API address of its Issue or PR. */
 const NotificationSchema = z.looseObject({
   repository: z.looseObject({ full_name: z.string() }), subject: z.looseObject({ url: z.string().nullish() }),
@@ -98,12 +99,14 @@ export const githubKind: SourceKind<GithubConfig> = {
       { key: 'DSH_SUPERAGENT_GITHUB_PR_HEAD', description: { zh: '接下工单的 PR 的 head 引用 refs/pull/<编号>/head；不是 PR 时为空', en: 'Head ref refs/pull/<number>/head of the PR that started the ticket; empty when it was not a PR' } },
     ],
     values: ({ deployment, trigger }) => {
+      if (!deployment.github.cli) return { DSH_SUPERAGENT_GITHUB_REPOSITORY: '', DSH_SUPERAGENT_GITHUB_ACCOUNT: '',
+        DSH_SUPERAGENT_GITHUB_COMMIT_EMAIL: '', DSH_SUPERAGENT_GITHUB_NUMBER: '', DSH_SUPERAGENT_GITHUB_PR_HEAD: '' }
       const number = trigger?.threads[0]?.source === SOURCE ? Number(trigger.meta.number) || 0 : 0
       return { DSH_SUPERAGENT_GITHUB_REPOSITORY: deployment.repository, DSH_SUPERAGENT_GITHUB_ACCOUNT: deployment.github.login, DSH_SUPERAGENT_GITHUB_COMMIT_EMAIL: deployment.github.noreply, DSH_SUPERAGENT_GITHUB_NUMBER: number ? String(number) : '',
         DSH_SUPERAGENT_GITHUB_PR_HEAD: number && trigger?.meta.isPr === true ? `refs/pull/${number}/head` : '' }
     },
   },
-  facts: (deployment): Record<string, Localized | string> => deployment ? {
+  facts: (deployment): Record<string, Localized | string> => deployment?.github.cli ? {
     cli: { zh: `当前账号 @${deployment.github.login}`, en: `Current account @${deployment.github.login}` },
   } : {},
 }
@@ -130,6 +133,8 @@ async function watch(ctx: SourceContext, signal: AbortSignal): Promise<void> {
   await ctx.ready
   // Setup restarts dsh-superagent once it resolves the accounts; until then nothing is polled.
   if (!ctx.configured()) { ctx.report('github', health('paused', 'setupPending')); return }
+  // A local repository installation has no GitHub account or remote to poll; the panel and local worktrees carry the work.
+  if (!ctx.deployment.github.cli) { ctx.report('github', health('paused', 'localRepository')); return }
   while (!signal.aborted) {
     const config = ctx.config<GithubConfig>(SOURCE)
     try {
@@ -152,7 +157,6 @@ interface Round {
 const newRound = (signal?: AbortSignal): Round => ({ started: new Date().toISOString(), signal, pulls: new Map(), read: new Set(),
   failures: [], dropped: [], abandoned: [], tally: { skipped: 0 } })
 const stopped = (ctx: SourceContext, round: Round): boolean => !!round.signal?.aborted || !ctx.config(SOURCE)
-export interface Retry { since: string; pr: boolean; failedAt?: string; attempts?: number }
 const RETRY_WINDOW_MS = 24 * 3600_000
 /** True when GitHub returns HTTP 410 (Gone); HTTP 404 is retried because it can indicate revoked access to a private repository. */
 const deleted = (error: unknown): boolean => error instanceof CliError && error.code === 410

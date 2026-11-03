@@ -50,10 +50,43 @@ export interface SourceChannel<C> {
    * Sends a message idempotently by ID; returns `'gone'` when the target conversation no longer accepts replies.
    * @throws when delivery failed but may succeed on a later retry.
    */
-  send(host: Pick<SourceContext, 'commands'>, message: OutboundMessage): Promise<'sent' | 'gone'>
+  send(host: Pick<SourceContext, 'commands'>, message: OutboundMessage, config: C): Promise<'sent' | 'gone'>
   /** Returns the URL and label for `address`; `url` is empty when `links` lack the required deployment info. */
   link(address: Record<string, string>, links: ChannelLinks): ChannelLink
 }
+/** Result of resolving a Trigger's own external page; `read` names the resource to read when the page cannot be resolved. */
+export interface SourceLinkResult { url?: string; read?: string }
+/** Host for resolving a Trigger's external page, with an optional cache shared with the caller. */
+export interface SourceLinkHost {
+  readonly commands: Commands
+  /** The caller's abort signal; link enrichment is best effort and may be omitted. */
+  readonly signal?: AbortSignal
+  /** Aborted when the runtime stops, so a link reader stops with it. */
+  readonly lifetime: AbortSignal
+  /** Cache for resolved links, keyed by the Source's own address. */
+  readonly cache: { get(key: string): string | undefined; set(key: string, value: string): void }
+}
+/** A message composed locally (such as in the management panel) rather than received from the Source's own transport. */
+export interface SourceIngress {
+  /** Stable ID of the message for idempotent Trigger IDs; a kind generates one when omitted. */
+  id?: string
+  text: string
+  /** Thread to continue; omitted starts a new Thread. */
+  thread?: string
+  /** The person whose message this is, in the Source's own identity space. */
+  actor?: { id: string; name?: string }
+  /** Source-native event data, such as a webhook payload, that the kind translates into a Trigger. */
+  meta?: Record<string, unknown>
+}
+/** Host for reading one external resource of a Trigger, such as a message or a repository file. */
+export interface SourceResourceHost {
+  readonly commands: Commands
+  readonly signal?: AbortSignal
+  /** The page size the reader should honor when the resource is paginated. */
+  readonly pageSize: number
+}
+/** Limits a kind applies to outbound messages; word counts use `wordCount`, as `IM_WORDS` does. */
+export interface SourceTextLimit { replyWords: number }
 /** Normalized message returned by thread context readers; `bot` marks a non-human sender whose message can never authorize work on its own (at most an inferred candidate). */
 export interface ContextMessage {
   id: string; from: string; at: string; text: string
@@ -85,6 +118,8 @@ export interface TriggerContext {
 export interface SourceKind<C extends Record<string, unknown> = Record<string, unknown>> {
   /** Stable ID; a default instance with the same ID exists when none is stored. */
   kind: string
+  /** Whether its first instance is on without a stored switch; omitted means on. */
+  defaultEnabled?: boolean
   title: Localized
   description: Localized
   /** Read-only status facts derived from `deployment` (undefined while waiting for setup), keyed by field key. */
@@ -98,6 +133,14 @@ export interface SourceKind<C extends Record<string, unknown> = Record<string, u
   scope?(input: { meta: Record<string, unknown> }, config: C): ScopeResult
   /** Outbound reply adapter; kinds without `channel` produce no replies or channel checks. */
   channel?: SourceChannel<C>
+  /** Resolves the external page of a Trigger's own message; kinds without `link` have no page beyond `Trigger.url`. */
+  link?(trigger: Trigger, host: SourceLinkHost, config: C): Promise<SourceLinkResult>
+  /** Largest outbound reply of this kind, in word-like segments; omitted for kinds without a limit. */
+  textLimit?: SourceTextLimit
+  /** Accepts a message composed locally (for example in the management panel); kinds without `ingress` cannot be written to locally. */
+  ingress?(input: SourceIngress, config: C): Trigger | Promise<Trigger>
+  /** Reads one external resource of a Trigger, such as a message or a repository file; kinds without `resource` expose none. */
+  resource?(trigger: Trigger, resource: string, host: SourceResourceHost, config: C): Promise<unknown>
   /** Bounded context reader for assessments; assessments of a kind without `threadContext` read none. */
   threadContext?: ThreadContext<C>
   /** Maps a search query to candidate Thread keys (such as `github:12`) and Trigger search terms (such as a Feishu `om_` ID). */

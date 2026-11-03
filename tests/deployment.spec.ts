@@ -46,7 +46,8 @@ describe('configuration schema', () => {
     // Limits are volatile references that the loader updates in place and callers read when used.
     expect({ ...read, promptMaxChars: read.promptMaxChars.get(), admissionContextMaxPages: read.admissionContextMaxPages.get(),
       admissionContextTimeoutMs: read.admissionContextTimeoutMs.get() })
-      .toEqual({ stateDir: join(dir, 'state'), promptMaxChars: 100000, admissionContextMaxPages: 10, admissionContextTimeoutMs: 15000 })
+      .toEqual({ stateDir: join(dir, 'state'), promptMaxChars: 100000, admissionContextMaxPages: 10, admissionContextTimeoutMs: 15000,
+        localRepository: '', localBranch: '' })
     expect(() => Config(minimal({ stateDir: 'relative/dir' }))).toThrow()
     expect(() => Config(minimal({ stateDir: '~/dir' }))).toThrow()
   })
@@ -64,6 +65,18 @@ describe('setup', () => {
     expect(deployment).not.toHaveProperty('feishu')
     // A renamed repository is still resolved by its old name; notifications carry GitHub's current full_name.
     expect((await resolveDeployment(machine(), { repository: 'acme/gadgets', cli: 'gh' }, probe, path)).repository).toBe('acme/widgets')
+  })
+  it('works in a local git repository without a GitHub account, and refuses to mix the two', async () => {
+    const local = join(dir, 'widgets')
+    await exec('git', ['-C', local, 'remote', 'set-url', 'origin', 'https://gitlab.example/group/widgets.git'], { env: gitEnv() })
+    const deployment = await resolveDeployment(machine({ localRepository: local, localBranch: 'master' }), {}, probe, path)
+    expect(deployment).toMatchObject({ repository: local,
+      local: { path: local, branch: 'master', remote: { url: 'https://gitlab.example/group/widgets.git', provider: 'gitlab' } },
+      github: { cli: '', login: '', noreply: '' } })
+    await expect(resolveDeployment(machine({ localRepository: local }), { repository: 'acme/widgets', cli: 'gh' }, probe, path))
+      .rejects.toEqual(setupError('deployment', 'repositoryConflict', {}))
+    await expect(resolveDeployment(machine({ localRepository: join(dir, 'missing') }), {}, probe, path))
+      .rejects.toEqual(setupError('deployment', 'localRepositoryUnreadable', { repository: join(dir, 'missing') }))
   })
   it('names what setup needs and where it is set', async () => {
     const needs = (place: string, code: string, values: Record<string, unknown>, github: unknown) =>

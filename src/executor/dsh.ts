@@ -8,6 +8,7 @@ import { key, latestAssignment, latestReport, liveTicket, runningAssignment, thr
 import type { AssessmentOutcome, Assignment, EngineForExecutor, Execution, Executor, Mandate, PolicyEffect, Ticket, TicketInput, Trigger }
   from '../core/index.ts'
 import type { Machine } from '../deployment.ts'
+import type { CodeHost } from '../codehost/index.ts'
 import { runAsWorker, verifyDirectory } from '../infra/environment.ts'
 import type { Settings } from '../policy.ts'
 import type { Store } from '../app/store.ts'
@@ -68,6 +69,8 @@ export interface ExecutorHost {
   /** The `worker` health entry, which reports whether background worker event handling failed. */
   readonly health: HealthEntry
   readonly machine: Pick<Machine, 'stateDir'>
+  /** The repository this installation works in and how a ticket directory is prepared for it. */
+  readonly code: CodeHost
   readonly lifetime: AbortSignal
   /** Session manager for worker sessions and for relaying worker reports to the main Session. */
   readonly sessions: Pick<Sessions, 'ensure' | 'prompt' | 'promptedId' | 'relay' | 'holds'>
@@ -256,6 +259,11 @@ export class DshExecutor implements Executor {
         // Remove an empty directory left by a failed prepare command so a later retry does not treat it as already prepared.
         await rmdir(directory).catch(() => { /* Absent, or holding what the command wrote, which the output explains. */ })
         throw new PrepareFailed(`The prepare command failed: ${error instanceof Error ? error.message : String(error)}`)
+      })
+    else if (this.host.code.kind === 'local') await this.host.code.prepare({ directory, subprocess: this.host.context.subprocess, signal, env })
+      .catch(async (error: unknown) => {
+        await rmdir(directory).catch(() => { /* Absent, or holding what git wrote, which the output explains. */ })
+        throw new PrepareFailed(`The local worktree could not be created: ${error instanceof Error ? error.message : String(error)}`)
       })
     await mkdir(directory, { recursive: true })
     await verifyDirectory(directory, this.host.context.subprocess, this.host.lifetime)

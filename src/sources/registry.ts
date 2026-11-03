@@ -3,7 +3,8 @@ import type { ChannelRef, OutboundMessage, ScopeResult, SourceScope, Trigger } f
 import type { Commands } from '../infra/commands.ts'
 import { HealthBoard, type HealthEntry } from '../infra/health.ts'
 import { AdmissionTableSchema, type Settings } from '../policy.ts'
-import type { ChannelLink, ChannelLinks, SourceInstance, SourceKind, TriggerContext, VariableSpec } from './kind.ts'
+import type { ChannelLink, ChannelLinks, SourceIngress, SourceInstance, SourceKind, SourceLinkHost, SourceLinkResult, SourceResourceHost,
+  TriggerContext, VariableSpec } from './kind.ts'
 
 
 /**
@@ -78,6 +79,31 @@ export class SourceRegistry implements SourceScope {
     const instance = this.resolve(kind, settings.sources[channel.source])
     return instance.enabled && (kind.channel?.allowed?.(channel.address, instance.config) ?? true)
   }
+  /** Largest outbound reply the kind allows, in word-like segments; undefined for a kind without a limit. */
+  replyWordLimit(source: string): number | undefined {
+    return this.kinds.get(source)?.textLimit?.replyWords
+  }
+  /** Resolves a Trigger's own external page through its kind; kinds without `link` have none. */
+  async triggerLink(trigger: Trigger, host: SourceLinkHost, settings = this.settings()): Promise<SourceLinkResult> {
+    const kind = this.kinds.get(trigger.source)
+    if (!kind?.link) return {}
+    const instance = this.resolve(kind, settings.sources[trigger.source])
+    return kind.link(trigger, host, instance.config)
+  }
+  /** Turns a locally composed message into a Trigger through its kind; kinds without `ingress`, or disabled instances, refuse it. */
+  async ingress(source: string, input: SourceIngress, settings = this.settings()): Promise<Trigger | undefined> {
+    const kind = this.kinds.get(source)
+    if (!kind?.ingress) return undefined
+    const instance = this.resolve(kind, settings.sources[source])
+    return instance.enabled ? kind.ingress(input, instance.config) : undefined
+  }
+  /** Reads one external resource of a Trigger through its kind; undefined for a kind without `resource` or a disabled instance. */
+  async resource(trigger: Trigger, resource: string, host: SourceResourceHost, settings = this.settings()): Promise<unknown | undefined> {
+    const kind = this.kinds.get(trigger.source)
+    if (!kind?.resource) return undefined
+    const instance = this.resolve(kind, settings.sources[trigger.source])
+    return instance.enabled ? kind.resource(trigger, resource, host, instance.config) : undefined
+  }
   /** Environment variable declarations for every installed kind, whether enabled or disabled. */
   declarations(): { kind: string; variables: readonly VariableSpec[] }[] {
     return [...this.kinds.values()].sort((a, b) => a.kind.localeCompare(b.kind)).flatMap(kind => kind.environment ? [{ kind: kind.kind, variables: kind.environment.variables }] : [])
@@ -95,7 +121,8 @@ export class SourceRegistry implements SourceScope {
   async send(message: OutboundMessage, commands: Commands): Promise<'sent' | 'gone' | 'waiting'> {
     const kind = this.kinds.get(message.channel.source)
     if (!kind) return 'waiting'
-    return kind.channel ? kind.channel.send({ commands }, message) : 'gone'
+    if (!kind.channel) return 'gone'
+    return kind.channel.send({ commands }, message, this.resolve(kind, this.settings().sources[kind.kind]).config)
   }
   link(channel: ChannelRef, links: ChannelLinks): ChannelLink {
     const link = this.kinds.get(channel.source)?.channel?.link(channel.address, links)
@@ -133,6 +160,7 @@ export class SourceRegistry implements SourceScope {
   /** Falls back to schema defaults and disables the instance when stored configuration fails validation. */
   private resolve(kind: SourceKind, stored: { enabled: boolean; config: Record<string, unknown> } | undefined): SourceInstance {
     const parsed = kind.schema.safeParse(stored?.config ?? {})
-    return { id: kind.kind, kind: kind.kind, enabled: parsed.success && (stored?.enabled ?? true), config: parsed.success ? parsed.data : kind.schema.parse({}) }
+    return { id: kind.kind, kind: kind.kind, enabled: parsed.success && (stored?.enabled ?? kind.defaultEnabled ?? true),
+      config: parsed.success ? parsed.data : kind.schema.parse({}) }
   }
 }

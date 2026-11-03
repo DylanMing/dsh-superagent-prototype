@@ -3,9 +3,10 @@ import type { Context } from '@deepseek-ai/cordis'
 import { z } from 'zod'
 import { FeishuBotSchema } from '../deployment.ts'
 import { feishuLink, sendFeishu } from './feishu-channel.ts'
-import { feishuThreadContext } from './feishu-read.ts'
+import { feishuThreadContext, readFeishuLink } from './feishu-read.ts'
 import { refreshChatNames, runFeishu } from './feishu-loops.ts'
-import { SOURCE, feishuTriggerId } from './feishu-trigger.ts'
+import { SOURCE, feishuRef, feishuTriggerId } from './feishu-trigger.ts'
+import { IM_WORDS } from '../infra/text.ts'
 import { sourceContext } from './host.ts'
 import type { Localized, SourceKind } from './kind.ts'
 import type { SourceRegistry } from './registry.ts'
@@ -51,6 +52,7 @@ export const feishuKind: SourceKind<FeishuConfig> = {
       hint: { zh: '查询原消息链接最多等待的时间；超时后智能体改为直接读取原消息。', en: 'How long to wait for an original message\'s link; after that, agents read the message itself.' } },
   ],
   health: ['feishu', 'history'],
+  textLimit: { replyWords: IM_WORDS },
   scope({ meta }, config) {
     if (meta.direct === true) return config.directMessages ? { listened: true, observed: false, row: 'direct' } : { listened: false, reason: 'direct_messages_not_allowed' }
     const chat = config.chats.find(item => item.chatId === meta.chatId)
@@ -62,6 +64,24 @@ export const feishuKind: SourceKind<FeishuConfig> = {
     allowed: (address, config) =>
       feishuKind.scope!({ meta: { chatId: address.chatId ?? '', direct: address.direct === 'true' } }, config).listened,
     send: sendFeishu, link: feishuLink,
+  },
+  // The link is enriched lazily: a missing link or a failed read leaves the caller the message resource instead.
+  async link(trigger, host, config) {
+    const ref = feishuRef(trigger)
+    if (!ref) return {}
+    const cacheKey = `${ref.chatId}:${ref.messageId}`
+    const cached = host.cache.get(cacheKey)
+    if (cached) return { url: cached }
+    try {
+      const timeout = AbortSignal.timeout(config.linkTimeoutMs)
+      const url = await readFeishuLink(host.commands.withSignal(AbortSignal.any([host.signal ?? host.lifetime, timeout])), ref)
+      host.cache.set(cacheKey, url)
+      return { url }
+    } catch {
+      host.lifetime.throwIfAborted()
+      host.signal?.throwIfAborted()
+      return { read: `feishu/${trigger.id}/message` }
+    }
   },
   threadContext: feishuThreadContext,
   find: query => ({ threads: [], terms: [...new Set(query.match(/om_[A-Za-z0-9_-]+/g) ?? [])] }),

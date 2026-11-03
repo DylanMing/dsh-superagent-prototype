@@ -73,6 +73,37 @@ describe('Source registry', () => {
     expect(await sources.send(message('quiet'), commands)).toBe('gone')
     expect(sources.threadContext({ ...trigger, source: 'quiet' })).toBeUndefined()
   })
+  it('offers a kind\'s optional link, ingress, resource and reply limit, and no ingress from a disabled instance', async () => {
+    const settings = SettingsSchema.parse({ sources: { probe: { enabled: true, config: { interval: 7 } } } })
+    const sources = new SourceRegistry(() => settings)
+    const trigger = { id: 't1', source: 'probe', threads: [{ source: 'probe', id: '1' }], actor: { source: 'probe', id: 'u' }, human: true,
+      at: '', text: 'hi', meta: { id: 'm1' } }
+    const cache = { values: new Map<string, string>(), get(key: string) { return cache.values.get(key) },
+      set(key: string, value: string) { cache.values.set(key, value) } }
+    const host = { commands: {} as Commands, lifetime: new AbortController().signal, cache }
+    const resourceHost = { commands: {} as Commands, pageSize: 20 }
+    sources.register({ ...probe,
+      link: async (item, linkHost, config) => { linkHost.cache.set(item.id, String(config.interval)); return { url: `https://probe/${item.id}` } },
+      ingress: (input, config) => ({ ...trigger, id: input.id ?? 'new', text: input.text, meta: { id: input.thread ?? 'new', interval: config.interval } }),
+      resource: async (_item, name, resourceHostValue, config) => ({ name, pageSize: resourceHostValue.pageSize, interval: config.interval }),
+      textLimit: { replyWords: 42 } })
+    expect(sources.replyWordLimit('probe')).toBe(42)
+    expect((await sources.triggerLink(trigger, host)).url).toBe('https://probe/t1')
+    expect(cache.values.get('t1')).toBe('7')
+    expect(await sources.ingress('probe', { text: 'hello', thread: 'p1' })).toMatchObject({ text: 'hello', meta: { id: 'p1', interval: 7 } })
+    expect(await sources.resource(trigger, 'message', resourceHost)).toEqual({ name: 'message', pageSize: 20, interval: 7 })
+    // A disabled instance still has its transport's link and word limit, but accepts no new work.
+    settings.sources.probe!.enabled = false
+    expect(sources.replyWordLimit('probe')).toBe(42)
+    expect((await sources.triggerLink(trigger, host)).url).toBe('https://probe/t1')
+    expect(await sources.ingress('probe', { text: 'hello' })).toBeUndefined()
+    expect(await sources.resource(trigger, 'message', resourceHost)).toBeUndefined()
+    settings.sources.probe!.enabled = true
+    sources.register({ ...probe, kind: 'bare' })
+    expect(await sources.triggerLink({ ...trigger, source: 'bare' }, host)).toEqual({})
+    expect(await sources.ingress('bare', { text: 'hello' })).toBeUndefined()
+    expect(await sources.resource({ ...trigger, source: 'bare' }, 'message', resourceHost)).toBeUndefined()
+  })
   it('refuses a kind that declares a health entry another kind or dsh-superagent itself reports, and gives up its entries at unregister', () => {
     const board = new HealthBoard()
     // Pre-claim built-in health entries; sync:* entries are reserved for settings sync.
