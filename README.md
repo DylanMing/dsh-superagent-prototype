@@ -10,6 +10,8 @@ It is also a way of working with an agent: **take as little human attention as p
 
 ## Setup
 
+**Never used DSH, Git or a terminal before? Start with the [beginner guide](docs/009-beginner-guide.md).** It explains the screen, the first message and the common failures in plain language.
+
 Setup has many steps, so an agent does it with you. Ask your coding agent:
 
 > Read SETUP.md in this repository and set up dsh-superagent with me.
@@ -29,6 +31,7 @@ Read the numbered documents in order; each builds only on the ones before it.
 - [006 Deployment](docs/006-deployment.md): manual setup, configuration, upgrades and troubleshooting
 - [007 Architecture](docs/007-architecture.md)
 - [008 Cookbook](docs/008-cookbook.md): adding a Source
+- [009 Beginner guide](docs/009-beginner-guide.md): first steps for someone who has never used DSH, Git or a terminal
 
 ## Development
 
