@@ -32,8 +32,11 @@ Read the numbered documents in order; each builds only on the ones before it.
 - [007 Architecture](docs/007-architecture.md)
 - [008 Cookbook](docs/008-cookbook.md): adding a Source
 - [009 Beginner guide](docs/009-beginner-guide.md): first steps for someone who has never used DSH, Git or a terminal
+- [010 Development guide](docs/010-development-guide.md): the target design, development history, current implementation and remaining work
 
 ## Development
+
+Before changing the Source or CodeHost architecture, read [docs/010-development-guide.md](docs/010-development-guide.md).
 
 `pnpm check` runs the typecheck, the tests and the build.
 
