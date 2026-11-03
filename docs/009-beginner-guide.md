@@ -1,325 +1,327 @@
-# 完全新手使用指南
+# Complete Beginner's Guide
 
-> 这份指南面向第一次接触 DSH、Git 和命令行的人。你不需要懂编程，照着做即可。
+> English | [中文](009-beginner-guide.zh.md)
+
+> This guide is for someone meeting DSH, Git and the command line for the first time. You do not need to know how to program; just follow it step by step.
 >
-> 当前项目是 **研究原型**，不是生产级软件。请先使用测试仓库，不要直接让它改重要代码。
+> The current project is a **research prototype**, not production-grade software. Use a test repository first, and do not let it change important code right away.
 
 ---
 
-## 1. 先用一句话理解它
+## 1. Understand it in one sentence
 
-**dsh-superagent 是一个住在 DeepSeek Harness（DSH）侧边栏里的“AI 工作助手”。**
+**dsh-superagent is an "AI work assistant" that lives in the sidebar of DeepSeek Harness (DSH).**
 
-你在面板里写一句话，它会：
+You write one sentence in the panel, and it:
 
-1. 判断这句话是不是一个明确的任务；
-2. 如果可以做，就建一个“任务”；
-3. 在一个单独的目录里执行；
-4. 把结果和说明回复到同一个对话里。
+1. decides whether that sentence is a clear task;
+2. if it can be done, creates a "task" (a Ticket);
+3. executes it in a separate directory;
+4. posts the result and an explanation back into the same conversation.
 
-整个过程不需要 GitHub，也不需要飞书。**只用侧边栏面板就能工作。**
+The whole flow needs neither GitHub nor Feishu. **The sidebar panel alone is enough to work.**
 
-可以把它想成一个新同事：
+Think of it as a new colleague:
 
-- 你告诉它要做什么；
-- 它先去理解；
-- 然后在一个单独的工作副本里动手；
-- 做完后向你汇报。
+- you tell it what to do;
+- it first works out what you mean;
+- then it gets to work in a separate working copy;
+- when it is done, it reports back to you.
 
 ---
 
-## 2. 你需要认识的 6 个词
+## 2. Six words you need to know
 
-| 词 | 用大白话解释 |
+| Word | In plain words |
 | --- | --- |
-| **DSH** | DeepSeek Harness，运行这个助手的宿主程序。你现在打开的网页就是 DSH 的界面。 |
-| **Superagent** | 项目在 DSH 左侧栏里的入口名称。点它就能打开这个助手的管理面板。 |
-| **面板（Panel）** | 你和助手对话、看任务状态、看结果的地方。 |
-| **触发（Trigger）** | 你发的一条消息。它先被记录下来，再进入“评估”。 |
-| **评估（Eval）** | 助手先判断：这句话要不要做、能不能做、该不该现在做。 |
-| **任务（Ticket）** | 评估通过后真正执行的工作。一个任务会有自己的状态、工作目录和结果。 |
+| **DSH** | DeepSeek Harness, the host program that runs this assistant. The web page you have open now is the DSH interface. |
+| **Superagent** | The name of the project's entry in the left sidebar of DSH. Click it to open this assistant's management panel. |
+| **Panel** | Where you talk to the assistant, watch task status and read results. |
+| **Trigger** | One message you send. It is recorded first, then goes into an "Eval". |
+| **Eval** | The assistant first decides: whether this sentence should be done, whether it can be done, and whether it should be done now. |
+| **Ticket** | The work that actually runs after an Eval accepts it. A Ticket has its own status, working directory and result. |
 
-你不需要记住这些英文。只需要知道：**发消息 → 等评估 → 看任务 → 读回复。**
+You do not need to memorise these English words. Just remember: **send a message → wait for the Eval → look at the Ticket → read the reply.**
 
 ---
 
-## 3. 当前这台机器的状态
+## 3. The state of this machine
 
-这台机器已经安装并启动了一套独立的 Superagent：
+This machine already has a separate Superagent installed and running:
 
-| 项目 | 当前值 |
+| Item | Current value |
 | --- | --- |
-| 面板端口 | `3082` |
-| 当前使用的测试仓库 | `/home/administrator/dsh-superagent-smoke` |
-| 任务工作目录 | `/home/administrator/.dsh/state/superagent/work` |
-| 运行 profile | `superagent` |
-| 普通 DSH 页面 | `3080`（不要和 3082 混淆） |
+| Panel port | `3082` |
+| Test repository in use | `/home/administrator/dsh-superagent-smoke` |
+| Ticket working directory | `/home/administrator/.dsh/state/superagent/work` |
+| Runtime profile | `superagent` |
+| Normal DSH page | `3080` (do not confuse it with 3082) |
 
-也就是说：
+That is:
 
-- `3080` 是你平时使用的 DSH；
-- `3082` 是这次安装的 Superagent 独立实例；
-- 两个实例互不影响。
+- `3080` is the DSH you use day to day;
+- `3082` is the standalone Superagent instance installed this time;
+- the two instances do not affect each other.
 
-当前测试仓库里只有一份 README，是专门用来做验证的“一次性仓库”。**可以放心让它读写。**
+The current test repository holds only one README; it is a throwaway repository made specifically for verification. **You can let the assistant read and write it freely.**
 
 ---
 
-## 4. 第一次打开面板
+## 4. Opening the panel for the first time
 
-### 4.1 找到带 token 的地址
+### 4.1 Find the address with the token
 
-DSH 面板需要一个带 `token` 的链接才能打开。这个链接相当于临时钥匙，**不要发给别人**。
+The DSH panel needs a link that carries a `token` before it will open. That link works like a temporary key, **do not send it to anyone**.
 
-如果你手上有安装时给出的链接，直接打开即可，形如：
+If you still have the link given at install time, just open it; it looks like:
 
 ```text
-http://127.0.0.1:3082/?token=一串字符
+http://127.0.0.1:3082/?token=a-string-of-characters
 ```
 
-如果链接丢了，在终端执行：
+If the link is lost, run this in a terminal:
 
 ```sh
 cd /home/administrator/dsh-superagent-prototype
 grep -h 'dsh web:' "$(ls -t .artifacts/dsh-superagent-superagent-*.log | head -1)"
 ```
 
-输出里会有一行：
+The output contains a line like:
 
 ```text
 dsh web: http://127.0.0.1:3082/?token=...
 ```
 
-把整行地址复制到浏览器打开。
+Copy the whole address into your browser and open it.
 
-> 如果浏览器提示 401、未授权或要求登录，通常就是没有带 token，或者用了旧的链接。
+> If the browser reports 401, unauthorized, or asks you to log in, it is usually because the token is missing or you used an old link.
 
-### 4.2 打开侧边栏入口
+### 4.2 Open the sidebar entry
 
-打开页面后：
+After the page opens:
 
-1. 看左侧栏；
-2. 找到 **Superagent**；
-3. 点击它。
+1. look at the left sidebar;
+2. find **Superagent**;
+3. click it.
 
-你会看到几个页签，常见的是：
+You will see several tabs, commonly:
 
-- **概览**：今天发生了什么、有没有需要你处理的事；
-- **来源**：消息从哪里来（面板、GitHub、Gitea、GitLab、飞书等）；
-- **触发**：所有对话和消息；
-- **评估**：助手对消息的判断记录；
-- **执行**：正在运行或已经结束的任务；
-- **设置**：模型、策略、执行器等配置。
+- **Overview**: what happened today, and whether anything needs you;
+- **Sources**: where messages come from (panel, GitHub, Gitea, GitLab, Feishu and so on);
+- **Trigger**: all conversations and messages;
+- **Eval**: the assistant's records of how it judged messages;
+- **Execution**: Tickets that are running or have already ended;
+- **Settings**: model, policy, executor and other configuration.
 
-第一次使用，只需要看 **触发** 和 **执行**。
+For first use, you only need **Trigger** and **Execution**.
 
 ---
 
-## 5. 发出第一条消息
+## 5. Sending your first message
 
-### 5.1 在哪里输入
+### 5.1 Where to type
 
-1. 点击左侧栏 **Superagent**；
-2. 点击顶部 **触发**；
-3. 找到输入框，里面写着“描述你想让 superagent 做的事…”；
-4. 输入一句话；
-5. 点击 **发送**，或按 `Ctrl + Enter`（Mac 用 `⌘ + Enter`）。
+1. Click **Superagent** in the left sidebar;
+2. click **Trigger** at the top;
+3. find the input box that says "Describe what you want superagent to do…";
+4. type one sentence;
+5. click **Send**, or press `Ctrl + Enter` (`⌘ + Enter` on a Mac).
 
-### 5.2 第一条消息建议这样写
+### 5.2 Write your first message like this
 
-第一次不要让它改文件，先让它做只读任务：
+The first time, do not ask it to change files; give it a read-only task first:
 
 ```text
-请只读查看当前仓库，用三句话介绍它是做什么的。不要修改任何文件。
+Please look at the current repository in read-only mode and introduce what it does in three sentences. Do not modify any file.
 ```
 
-这句话包含了三个重要信息：
+This sentence carries three important pieces of information:
 
-- **只读**：明确不允许改文件；
-- **当前仓库**：范围清楚；
-- **三句话**：结果长度清楚。
+- **read-only**: changing files is explicitly not allowed;
+- **current repository**: the scope is clear;
+- **three sentences**: the length of the result is clear.
 
-### 5.3 发送后会发生什么
+### 5.3 What happens after you send it
 
-你通常会依次看到：
+You will usually see, in order:
 
-1. **已接收**：消息变成了一个 Trigger；
-2. **评估中**：助手在判断；
-3. **已接受**：创建了任务；
-4. **执行中**：任务在工作目录里运行；
-5. **已结束**：有最终回复。
+1. **Received**: the message has become a Trigger;
+2. **Evaluating**: the assistant is making its assessment;
+3. **Accepted**: a Ticket has been created;
+4. **Running**: the Ticket runs in the working directory;
+5. **Ended**: there is a final reply.
 
-在“触发”里点开这条对话，可以看到完整时间线；在“执行”里可以看到任务详情。
+Open this conversation in **Trigger** to see the full timeline; open **Execution** to see the Ticket details.
 
 ---
 
-## 6. 怎么看结果
+## 6. How to read the result
 
-### 6.1 看对话里的回复
+### 6.1 Read the reply in the conversation
 
-任务结束后，对话里会出现回复，通常包括：
+After the Ticket ends, a reply appears in the conversation, usually covering:
 
-- 它做了什么；
-- 发现了什么；
-- 是否修改了文件；
-- 有没有需要你注意的地方。
+- what it did;
+- what it found;
+- whether it changed any file;
+- anything you should pay attention to.
 
-### 6.2 看任务状态
+### 6.2 Look at the Ticket status
 
-点击 **执行**，找到对应任务。常见状态：
+Click **Execution** and find the Ticket. Common statuses:
 
-| 状态 | 意思 |
+| Status | Meaning |
 | --- | --- |
-| **执行中** | 正在工作 |
-| **等待你** | 它有一个问题需要你回答 |
-| **已结束** | 工作完成，回复已发出 |
-| **失败** | 出错了，需要重试或检查 |
-| **已停止** | 被人为停止 |
+| **Working** | It is working |
+| **Awaiting answer** | It has a question that needs your answer |
+| **Ended** | The work is done and the reply has been sent |
+| **Failed** | Something went wrong; retry or investigate |
+| **Stopped** | A person stopped it |
 
-### 6.3 看它改了什么
+### 6.3 See what it changed
 
-如果任务修改了文件，工作副本在：
+If the Ticket changed files, the working copy is at:
 
 ```text
-/home/administrator/.dsh/state/superagent/work/<任务名>-<编号>
+/home/administrator/.dsh/state/superagent/work/<ticket-name>-<number>
 ```
 
-你可以让助手在回复里列出改动，也可以请懂 Git 的人检查这个目录。
+You can ask the assistant to list the changes in its reply, or ask someone who knows Git to inspect this directory.
 
-> 重要：当前测试仓库是 smoke 仓库，不是你的正式项目。正式使用前请先换成项目副本。
+> Important: the current test repository is the smoke repository, not your real project. Before real use, switch to a copy of your project.
 
 ---
 
-## 7. 继续追问同一个任务
+## 7. Following up on the same Ticket
 
-不要每次都新建对话。正确做法是：
+Do not start a new conversation every time. The right way is:
 
-1. 打开 **触发**；
-2. 点开之前的对话；
-3. 在对话底部的输入框继续写；
-4. 发送。
+1. open **Trigger**;
+2. open the earlier conversation;
+3. keep writing in the input box at the bottom of the conversation;
+4. send.
 
-这样新消息会进入同一个上下文，助手知道你在接着上一件事说。
+The new message then enters the same context, and the assistant knows you are continuing the previous piece of work.
 
-适合继续说的情况：
+Good cases for continuing:
 
-- “把刚才的说明再缩短一点。”
-- “再检查一下有没有遗漏。”
-- “这个方案先不要改代码，只解释原因。”
-
----
-
-## 8. 怎样提要求，结果更好
-
-### 8.1 推荐模板
-
-```text
-请【只读 / 修改】查看【哪个目录或文件】，
-完成【具体目标】，
-不要做【明确禁止的事】，
-完成后告诉我【你希望看到的结果】。
-```
-
-### 8.2 三个示例
-
-只读检查：
-
-```text
-请只读检查当前仓库的 README，指出其中可能让人误解的地方。不要修改文件。
-```
-
-小范围修改：
-
-```text
-请只修改 README.md，把标题下面的第一段改写得更适合新手阅读。不要改其他文件，改完告诉我改了哪几行。
-```
-
-先讨论再动手：
-
-```text
-我想给这个仓库增加一个安装说明，但先不要修改文件。请先给我两个方案，说明各自优缺点，等我选择。
-```
-
-### 8.3 尽量避免
-
-- 一次要求太多件事；
-- 不说范围，例如“帮我优化一下项目”；
-- 不说是否允许改文件；
-- 把密码、token、私钥贴进对话；
-- 在正式仓库上做第一次试验。
+- "Shorten the explanation you just gave a little more."
+- "Check again whether anything is missing."
+- "Do not change any code for this plan yet; just explain the reasons."
 
 ---
 
-## 9. 停止、重启和查看状态
+## 8. How to ask so the result is better
 
-以下命令都在项目目录执行：
+### 8.1 Recommended template
+
+```text
+Please look at [which directory or file] [read-only / with changes],
+complete [the specific goal],
+do not do [what is explicitly forbidden],
+and when you are done tell me [the result you want to see].
+```
+
+### 8.2 Three examples
+
+Read-only check:
+
+```text
+Please check the README of the current repository in read-only mode and point out anything in it that could mislead a reader. Do not modify any file.
+```
+
+Small-scope change:
+
+```text
+Please change only README.md, and rewrite the first paragraph under the title so it reads better for a beginner. Do not change other files, and tell me which lines you changed when you are done.
+```
+
+Discuss first, act later:
+
+```text
+I want to add installation instructions to this repository, but do not modify any file yet. Please give me two options first, explain the pros and cons of each, and wait for me to choose.
+```
+
+### 8.3 Try to avoid
+
+- asking for too many things at once;
+- not stating the scope, for example "help me optimize the project";
+- not saying whether changing files is allowed;
+- pasting passwords, tokens or private keys into the conversation;
+- doing your first experiment on a real repository.
+
+---
+
+## 9. Stopping, restarting and checking status
+
+Run the following commands from the project directory:
 
 ```sh
 cd /home/administrator/dsh-superagent-prototype
 ```
 
-### 9.1 查看是否在运行
+### 9.1 Check whether it is running
 
 ```sh
 PATH=/tmp/dsh-bin:$PATH scripts/dsh-superagent status \
   --profile superagent --url http://127.0.0.1:3082
 ```
 
-看到：
+If you see:
 
 ```json
 "health": { "runtime": "ready" }
 ```
 
-并且命令退出码为 `0`，就表示正常。
+and the command exits with code `0`, everything is normal.
 
-### 9.2 停止
+### 9.2 Stop
 
 ```sh
 PATH=/tmp/dsh-bin:$PATH scripts/dsh-superagent stop \
   --profile superagent --url http://127.0.0.1:3082
 ```
 
-停止后，网页打不开是正常的；自动恢复也会暂停，直到你再次启动。
+After stopping, the web page not opening is normal; automatic recovery also pauses until you start it again.
 
-### 9.3 启动
+### 9.3 Start
 
 ```sh
 PATH=/tmp/dsh-bin:$PATH scripts/dsh-superagent start \
   --profile superagent --url http://127.0.0.1:3082
 ```
 
-启动后等待提示 ready，再打开带 token 的地址。
+After starting, wait for the ready message, then open the address with the token.
 
-### 9.4 重启
+### 9.4 Restart
 
 ```sh
 PATH=/tmp/dsh-bin:$PATH scripts/dsh-superagent restart \
   --profile superagent --url http://127.0.0.1:3082
 ```
 
-> `/tmp/dsh-bin/dsh` 是这台机器上临时使用的 DSH 启动器。机器重启后如果它不见了，启动会提示找不到 `dsh`。这时请让维护者全局安装 DSH，或重新创建这个启动器。
+> `/tmp/dsh-bin/dsh` is a temporary DSH launcher used on this machine. If it disappears after the machine restarts, starting will report that `dsh` cannot be found. In that case ask the maintainer to install DSH globally, or recreate this launcher.
 
 ---
 
-## 10. 换成你自己的仓库
+## 10. Switching to your own repository
 
-当前配置指向测试仓库：
+The current configuration points to the test repository:
 
 ```text
 /home/administrator/dsh-superagent-smoke
 ```
 
-要换成自己的仓库，先确认它已经是一个 Git 仓库：
+To switch to your own repository, first confirm that it is already a Git repository:
 
 ```sh
-cd /你的/项目目录
+cd /your/project/directory
 git status
 ```
 
-能正常显示分支和文件，就说明可以。
+If it shows the branch and files normally, it is usable.
 
-然后编辑 Superagent 的配置文件：
+Then edit the Superagent configuration file:
 
 ```sh
 cp ~/.dsh/profiles/superagent/cordis.patch.yml \
@@ -328,142 +330,142 @@ cp ~/.dsh/profiles/superagent/cordis.patch.yml \
 nano ~/.dsh/profiles/superagent/cordis.patch.yml
 ```
 
-找到这一行：
+Find this line:
 
 ```yaml
 localRepository: /home/administrator/dsh-superagent-smoke
 ```
 
-改成你的仓库绝对路径，例如：
+Change it to the absolute path of your repository, for example:
 
 ```yaml
 localRepository: /home/administrator/my-project
 ```
 
-保存并退出：
+Save and exit:
 
 - `Ctrl + O`
-- 回车
+- Enter
 - `Ctrl + X`
 
-然后重启：
+Then restart:
 
 ```sh
 PATH=/tmp/dsh-bin:$PATH scripts/dsh-superagent restart \
   --profile superagent --url http://127.0.0.1:3082
 ```
 
-注意：
+Notes:
 
-- 路径必须是**绝对路径**；
-- 路径尽量**不要有空格**；
-- 不要同时配置 GitHub 仓库和 `localRepository`，两者只能选一个；
-- 第一次接入正式项目，建议先复制一份副本，不要直接指向最重要的仓库。
+- the path must be an **absolute path**;
+- try to **avoid spaces** in the path;
+- do not configure a GitHub repository and `localRepository` at the same time; you can only choose one of the two;
+- for a first connection to a real project, copy it first; do not point at your most important repository directly.
 
 ---
 
-## 11. 常见问题
+## 11. Frequently asked questions
 
-### Q1：页面打不开
+### Q1: The page does not open
 
-先看服务是否运行：
+First check whether the service is running:
 
 ```sh
 PATH=/tmp/dsh-bin:$PATH scripts/dsh-superagent status \
   --profile superagent --url http://127.0.0.1:3082
 ```
 
-- 如果 `pids` 为空：服务没启动，执行 `start`；
-- 如果显示 401：地址没有带 token，按第 4.1 节重新获取；
-- 如果连接被拒绝：端口不对，确认是 `3082`；
-- 如果状态报错：查看 `.artifacts/` 下最新的日志。
+- if `pids` is empty: the service is not started, run `start`;
+- if it shows 401: the address has no token, get it again as described in section 4.1;
+- if the connection is refused: wrong port, confirm it is `3082`;
+- if the status reports an error: read the newest log under `.artifacts/`.
 
-### Q2：侧边栏没有 Superagent
+### Q2: There is no Superagent in the sidebar
 
-说明浏览器加载的 profile 不对，或者 bundle 没安装好。确认你打开的是 `3082`，而不是 `3080`。
+That means the browser loaded the wrong profile, or the bundle is not installed properly. Confirm that you opened `3082`, not `3080`.
 
-### Q3：消息发出去了，但一直没有回复
+### Q3: The message was sent, but there is never a reply
 
-按顺序检查：
+Check in order:
 
-1. **概览**里有没有“问题”；
-2. **执行**里任务是什么状态；
-3. 是否停在“等待你”（它可能问了你一个问题）；
-4. 服务是否还 ready；
-5. 是否模型网络或额度有问题。
+1. whether **Overview** shows a "problem";
+2. what status the Ticket has in **Execution**;
+3. whether it is stuck at "Awaiting answer" (it may have asked you a question);
+4. whether the service is still ready;
+5. whether the model network or quota has a problem.
 
-### Q4：它改错文件了
+### Q4: It changed the wrong files
 
-先不要继续发消息。打开 **执行**，找到任务并点击 **停止**；然后检查：
+Do not keep sending messages for now. Open **Execution**, find the Ticket and click **Stop**; then inspect the working copy under:
 
 ```text
 /home/administrator/.dsh/state/superagent/work/
 ```
 
-里的工作副本。正式项目建议用 Git 提交来审查和回滚。
+For real projects, review and roll back with Git commits.
 
-### Q5：需要 GitHub 或飞书吗？
+### Q5: Do I need GitHub or Feishu?
 
-不需要。
+No.
 
-- **只用侧边栏**：不需要任何外部账号；
-- **接 GitHub**：需要专用账号和 `gh`；
-- **接飞书**：需要飞书机器人和对应 CLI；
-- **接 Gitea/GitLab**：需要 webhook、API token，并让服务可被访问。
+- **Sidebar only**: no external account is needed;
+- **GitHub**: needs a dedicated account and `gh`;
+- **Feishu**: needs a Feishu bot and the corresponding CLI;
+- **Gitea/GitLab**: needs a webhook and an API token, and the service must be reachable.
 
-第一次使用，保持默认的 panel + 本地仓库即可。
+For first use, keep the default panel + local repository.
 
-### Q6：会不会很贵
+### Q6: Will it be expensive
 
-每条消息都会触发一次评估；被接受后还会启动执行任务，可能调用多次模型。不要用重复消息刷屏，也不要把大段无关内容一次塞进去。
+Every message triggers an Eval; once accepted it also starts an execution task, which may call the model several times. Do not flood it with repeated messages, and do not stuff a large amount of unrelated content in at once.
 
-### Q7：数据存在哪里
+### Q7: Where is the data stored
 
 ```text
 /home/administrator/.dsh/state/superagent/
 ```
 
-里面有数据库、日志、任务工作目录和运行状态。升级或迁移前先备份这个目录。
+It holds the database, logs, Ticket working directories and runtime state. Back up this directory before upgrading or migrating.
 
 ---
 
-## 12. 安全边界
+## 12. Safety boundaries
 
-请把 Superagent 当成一个**有能力但需要监督的实习生**：
+Please treat Superagent as an **intern who is capable but needs supervision**:
 
-1. **它会真的改文件**，不是只给建议；
-2. **它可能理解错**，尤其是范围模糊的要求；
-3. **回复不一定 100% 正确**，重要结论要自己复核；
-4. **token 是钥匙**，不要截图发群、不要提交到 Git；
-5. **不要贴密码、私钥、API Key**；
-6. **正式仓库先用副本**，确认行为后再接入；
-7. 当前项目是研究原型，不建议直接用于生产环境。
-
----
-
-## 13. 十分钟上手清单
-
-- [ ] 打开带 token 的 `3082` 地址
-- [ ] 左侧栏点击 **Superagent**
-- [ ] 点击顶部 **触发**
-- [ ] 输入：`请只读查看当前仓库，用三句话介绍它，不要修改文件。`
-- [ ] 按 `Ctrl/⌘ + Enter` 发送
-- [ ] 等待状态从“评估中”变为“已结束”
-- [ ] 阅读回复
-- [ ] 打开 **执行**，看一眼任务详情
-- [ ] 在同一个对话里追问一句
-- [ ] 确认自己会停止任务、停止服务和查看状态
-
-做完这十步，你就已经会使用它了。
+1. **It really changes files**; it does not just give advice;
+2. **It may misunderstand**, especially with vague requests;
+3. **Its replies are not necessarily 100% correct**; verify important conclusions yourself;
+4. **the token is a key**; do not screenshot it into a group chat, and do not commit it to Git;
+5. **do not paste passwords, private keys or API keys**;
+6. **use a copy of a real repository first**, and connect the real one after you have confirmed its behavior;
+7. the current project is a research prototype and is not recommended for direct production use.
 
 ---
 
-## 14. 还想继续学
+## 13. Ten-minute quick start checklist
 
-- 想了解项目理念：读 [000-philosophy.md](000-philosophy.md)
-- 想了解任务和触发：读 [001-domain.md](001-domain.md)
-- 想了解权限：读 [002-authorization.md](002-authorization.md)
-- 想了解部署和配置：读 [006-deployment.md](006-deployment.md)
-- 想自己加一个消息来源：读 [008-cookbook.md](008-cookbook.md)
+- [ ] Open the `3082` address with the token
+- [ ] Click **Superagent** in the left sidebar
+- [ ] Click **Trigger** at the top
+- [ ] Enter: `Please look at the current repository in read-only mode, introduce it in three sentences, and do not modify any file.`
+- [ ] Press `Ctrl/⌘ + Enter` to send
+- [ ] Wait for the status to change from "Evaluating" to "Ended"
+- [ ] Read the reply
+- [ ] Open **Execution** and take a look at the Ticket details
+- [ ] Follow up with one more sentence in the same conversation
+- [ ] Confirm that you can stop a Ticket, stop the service and check the status
 
-遇到问题时，先看 **概览** 里的提示，再看 `.artifacts/` 下最新的日志；这两处通常已经写明了原因。
+After these ten steps you already know how to use it.
+
+---
+
+## 14. Where to learn more
+
+- To understand the project's philosophy: read [000-philosophy.md](000-philosophy.md)
+- To understand Tickets and Triggers: read [001-domain.md](001-domain.md)
+- To understand authorization: read [002-authorization.md](002-authorization.md)
+- To understand deployment and configuration: read [006-deployment.md](006-deployment.md)
+- To add a message source yourself: read [008-cookbook.md](008-cookbook.md)
+
+When you run into a problem, look first at the hints in **Overview**, then at the newest log under `.artifacts/`; these two places usually already state the cause.

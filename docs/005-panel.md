@@ -1,5 +1,7 @@
 # 005 Panel
 
+> English | [中文](005-panel.zh.md)
+
 Open **Superagent** in the DeepSeek Harness Web sidebar to supervise the agent. The panel prioritizes work that needs a person, then system health and history. This document builds on [000 Philosophy](000-philosophy.md) through [004 Prompts](004-prompts.md).
 
 ## Three questions

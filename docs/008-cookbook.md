@@ -1,5 +1,7 @@
 # 008 Cookbook
 
+> English | [中文](008-cookbook.zh.md)
+
 This cookbook shows how to extend dsh-superagent. It uses the terms in [001 Domain model](001-domain.md) and [002 Authorization](002-authorization.md), and the components in [007 Architecture](007-architecture.md).
 
 ## Use a local git repository

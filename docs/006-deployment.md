@@ -1,5 +1,7 @@
 # 006 Deployment
 
+> English | [中文](006-deployment.zh.md)
+
 Use this guide to install, configure and operate dsh-superagent. It covers accounts, startup checks, upgrades and troubleshooting, building on [001 Domain model](001-domain.md) through [005 Panel](005-panel.md).
 
 ## What runs

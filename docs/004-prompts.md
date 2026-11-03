@@ -1,5 +1,7 @@
 # 004 Prompts
 
+> English | [中文](004-prompts.zh.md)
+
 This document explains what the agents read, what a team can edit, and when changes take effect. It builds on [000 Philosophy](000-philosophy.md) through [003 Execution](003-execution.md). Prompt text is written in English.
 
 ## What a team writes

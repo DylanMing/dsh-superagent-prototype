@@ -1,5 +1,7 @@
 # 000 Philosophy
 
+> English | [中文](000-philosophy.zh.md)
+
 dsh-superagent is a framework, and also a way of working with an agent. Its core principle:
 
 **Take as little human attention as possible, and give as much value as possible.**

@@ -42,13 +42,23 @@ describe('documentation', () => {
     const violations = numbered.flatMap(name => links(join(ROOT, 'docs', name)).flatMap(target => {
       const linked = resolve(ROOT, 'docs', target)
       if (!linked.endsWith('.md')) return []
-      const number = NUMBERED.exec(linked.slice(linked.lastIndexOf('/') + 1))?.[1]
-      return dirname(linked) === join(ROOT, 'docs') && number !== undefined && number < name.slice(0, 3) ? [] : [`${name} → ${target}`]
+      const basename = linked.slice(linked.lastIndexOf('/') + 1)
+      const number = NUMBERED.exec(basename.replace(/\.zh\.md$/, '.md'))?.[1]
+      // A document may link to an earlier document, or to its own Chinese translation.
+      const languageSwitch = basename.endsWith('.zh.md') && number === name.slice(0, 3)
+      return dirname(linked) === join(ROOT, 'docs') && number !== undefined && (number < name.slice(0, 3) || languageSwitch)
+        ? [] : [`${name} → ${target}`]
     }))
     expect(violations).toEqual([])
   })
-  it('resolves every local link', () => {
-    const files = [...entries.map(name => join(ROOT, name)), ...numbered.map(name => join(ROOT, 'docs', name))]
+  it('ships a Chinese translation beside every numbered document, README and SETUP', () => {
+    const numberedMissing = numbered.filter(name => !existsSync(join(ROOT, 'docs', name.replace(/\.md$/, '.zh.md'))))
+    const rootMissing = entries.filter(name => !existsSync(join(ROOT, name.replace(/\.md$/, '.zh.md'))))
+    expect([...rootMissing, ...numberedMissing]).toEqual([])
+  })
+  it('resolves every local link in every document', () => {
+    const translated = ['README.zh.md', 'SETUP.zh.md', ...readdirSync(join(ROOT, 'docs')).filter(name => name.endsWith('.md')).map(name => `docs/${name}`)]
+    const files = [...entries.map(name => join(ROOT, name)), ...translated.map(name => join(ROOT, name))]
     const missing = files.flatMap(file => links(file).filter(target => !existsSync(resolve(dirname(file), target))).map(target => `${file.slice(ROOT.length + 1)} → ${target}`))
     expect(missing).toEqual([])
   })
