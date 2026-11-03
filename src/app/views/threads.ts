@@ -49,7 +49,10 @@ export function threadDetail(host: ViewHost, key: string, before: string | undef
     }),
     tickets: thread.subscriptions.flatMap(id => { const ticket = store.tickets.get(id); return ticket ? [ticketLine(view, ticket)] : [] }),
     decisions: decisions.slice().reverse().map(decision => decisionView(view, decision)),
-    timeline: shown.map(trigger => triggerView(view, trigger, decisions)), earlier: more ? `${shown[0]!.at}|${shown[0]!.id}` : null }
+    timeline: shown.map(trigger => triggerView(view, trigger, decisions)), earlier: more ? `${shown[0]!.at}|${shown[0]!.id}` : null,
+    // Outbound receipts complete the panel conversation; other Sources usually keep their own copy in the external chat.
+    messages: store.receipts.thread(key).slice(-100).map(receipt => ({ id: receipt.id, at: receipt.at ?? '', kind: receipt.kind,
+      text: receipt.text, status: receipt.status, ...(receipt.ticketId ? { ticketId: receipt.ticketId } : {}) })) }
 }
 export type ThreadDetailView = NonNullable<ReturnType<typeof threadDetail>>
 /**

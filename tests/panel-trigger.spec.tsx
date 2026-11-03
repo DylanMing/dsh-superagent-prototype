@@ -52,7 +52,7 @@ it('filters the Thread list by activity, and unsubscribes from a Thread page aft
 it('folds consecutive automated messages from one sender on a Thread, showing the newest with its text', async () => {
   const bot = (id: string, at: string) => trigger(id, at, { actor: { source: 'github', id: '' }, human: false,
     text: `CI of PR #42 at abc1234: 3 checks, 0 failed, ${id === 'b3' ? 0 : 1} running.`, preview: `CI ${id}` })
-  server.threadPages = () => ({ ...threadSummary(), tickets: [], correlated: [], decisions: [], earlier: null, context: [],
+  server.threadPages = () => ({ ...threadSummary(), tickets: [], correlated: [], decisions: [], earlier: null, context: [], messages: [],
     timeline: [bot('b1', '2026-09-23T00:00:00Z'), bot('b2', '2026-09-23T00:01:00Z'), trigger('h1', '2026-09-23T00:02:00Z'), bot('b3',
       '2026-09-23T00:03:00Z'), bot('b4', '2026-09-23T00:04:00Z')] })
   await mount()
@@ -77,7 +77,7 @@ it('reads the page around a link\'s target once, also for a Trigger the Thread d
 
 it('shows a follow-up delivered to its Ticket without an Eval, a hand-back with why, and a Ticket that follows the Thread for context', async () => {
   server.threadPages = () => ({ ...threadSummary(), tickets: [ticketSummary(), ticketSummary({ id: 't2', title: '相关工单' })],
-    correlated: [], decisions: [], earlier: null, context: ['t2'], url: undefined,
+    correlated: [], decisions: [], earlier: null, context: ['t2'], url: undefined, messages: [],
     timeline: [trigger('f1', '2026-09-23T00:00:00Z', { disposition: { delivered: true, fanout: ['t1'] } }),
       trigger('f2', '2026-09-23T00:01:00Z', { disposition: { queued: true, fanout: ['t1'], handbacks: [{ ticketId: 't1', title: '修复回归',
         reason: 'Asks for a new page', at: '2026-09-23T00:02:00Z' }] } })] })
@@ -105,7 +105,7 @@ function busyThread(count: number) {
     const end = around ? thread.triggers.find(item => item.id === around)?.at : undefined
     const kept = thread.triggers.filter(item => end ? item.at <= end : !before || item.at < before)
     const timeline = kept.slice(-50)
-    return { ...threadSummary(), tickets: [], correlated: [], decisions: [], context: [], url: undefined, timeline,
+    return { ...threadSummary(), tickets: [], correlated: [], decisions: [], context: [], url: undefined, messages: [], timeline,
       earlier: kept.length > 50 ? timeline[0]!.at : null }
   }
   return thread

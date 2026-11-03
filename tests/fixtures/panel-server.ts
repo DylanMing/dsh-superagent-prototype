@@ -224,7 +224,7 @@ const ticketDetail = (): TicketPageView => ({
 function threadPage(key: string, { before, around }: { before?: string; around?: string }): ThreadPageView | undefined {
   if (key !== threadSummary().key) return undefined
   const base = { ...threadSummary(), tickets: [ticketSummary()], correlated: [{ key: 'github:42', title: 'PR 42' }], decisions: [],
-    url: 'https://example.test/thread', context: [] }
+    url: 'https://example.test/thread', context: [], messages: [] }
   const decision = { id: 'd1', outcome: 'accept' as const, reason: [{ code: 'said', values: { text: 'x' } }], ticketId: 't1' }
   if (before === 'cursor-1' || around === 'e1') return { ...base, timeline: [trigger('e1', '2026-09-20T00:00:00Z',
     { disposition: { decision } })], earlier: null }
@@ -318,6 +318,10 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
     const removed = server.threads.length > 0
     server.threads = []
     return { removed, thread: params.key, context_delivery: 'injected' }
+  } },
+  'POST messages': { body: true, answer: ({ body }) => {
+    const thread = `panel:${body?.thread?.replace('panel:', '') ?? body?.id ?? 'test'}`
+    return { trigger_id: 'panel:test', thread }
   } },
   'POST triggers/:id/requeue': { answer: ({ params }) => { server.queued.add(params.id); return { queued: true } } },
   'GET decisions': { query: ['kind', 'window', 'offset', 'limit'], answer: ({ query }) =>

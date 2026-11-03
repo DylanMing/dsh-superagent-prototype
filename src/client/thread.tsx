@@ -3,6 +3,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { ApiError, usePoll, type ThreadPageView, type TriggerRow } from './api.ts'
 import { Button, DisclosureRow, Icon, Tag } from './controls.tsx'
 import { decisionMark } from './marks.ts'
+import { PanelComposer } from './panel.tsx'
 import { useAction, usePanel } from './provider.tsx'
 import { DecisionLine, Earlier, TicketLine, automatedRuns } from './rows.tsx'
 import { actorName, errorText, readableMarkers, reasonLabel, valueLabel, when, type T } from './text.ts'
@@ -166,6 +167,18 @@ export function ThreadPage({ id, target }: { id: string; target?: string }) {
         </Button>
       </div>}
     </Section>
+    {data.messages.length > 0 && <Section title={t('panelReplies')} count={data.messages.length}>
+      <ul className="dt-list">{data.messages.map(message => <li key={message.id} className="dt-event dt-event-quiet">
+        <div className="dt-event-foot"><strong className="dt-event-actor">{t('panelAgent')}</strong>
+          {message.at && <When at={message.at} />}
+          {message.status === 'dropped' && <Tag tone="danger">{t('panelDropped')}</Tag>}
+        </div>
+        <ClampText text={message.text} />
+      </li>)}</ul>
+    </Section>}
+    {data.source === 'panel' && <Section title={t('panelContinue')}>
+      <PanelComposer thread={data.key} onSent={reload} />
+    </Section>}
     {data.tickets.length > 0 && <div className="dt-danger-zone">
       <span className="dt-hint">{t('unsubscribeHint')}</span>
       <ConfirmButton variant="outline" icon="unsubscribe" label={t('unsubscribe')} title={t('unsubscribeTitle')}

@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { THREAD_FILTERS, type ThreadFilter } from '../app/api.ts'
 import { usePoll } from './api.ts'
 import { Pill } from './controls.tsx'
+import { PanelComposer } from './panel.tsx'
 import { usePanel } from './provider.tsx'
 import { ThreadLine } from './rows.tsx'
 import { Hint, LoadMore, LoadState, StatusHead } from './widgets.tsx'
@@ -15,6 +16,8 @@ export function TriggerStatus({ filter }: { filter: ThreadFilter }) {
     true) }
   return <>
     <StatusHead hint={t('triggerIntro')} />
+    <PanelComposer placeholder={t('panelStartPlaceholder')}
+      onSent={async thread => navigate({ page: 'trigger', id: thread })} />
     <div className="dt-filters">
       {THREAD_FILTERS.map(value => <Pill key={value} active={filter === value}
         onClick={() => go(value)}>{t(`threadFilter.${value}`)}</Pill>)}
